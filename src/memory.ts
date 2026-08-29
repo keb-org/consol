@@ -5,6 +5,7 @@ import { Database } from "bun:sqlite";
 import { atomicWrite, appendJsonl, evidencePath, frontmatter, hashContent, notePath, parseFrontmatter, stableId, withVaultLock } from "./vault";
 import { removeIndexedPath, syncVault } from "./index";
 import { containsSecret } from "./security";
+import { nearDuplicateStatement } from "./transfer";
 import type { Packet, RetrievalUsageItem } from "./retrieval";
 
 export type RememberInput = { statement: string; scope?: string; refs?: string[] };
@@ -67,6 +68,7 @@ async function findDuplicate(agentRoot: string, statement: string) {
       const { meta, body } = parseFrontmatter(text);
       const assertion = body.replace(/\n\nRefs:[\s\S]*$/i, "");
       if (normalizeStatement(assertion) === normalized) return meta.id ?? entry.name.slice(0, -3);
+      if (nearDuplicateStatement(assertion, statement)) return meta.id ?? entry.name.slice(0, -3);
     }
   }
   return null;

@@ -5,6 +5,7 @@ import { Database } from "bun:sqlite";
 import { atomicWrite, hashContent, parseFrontmatter, stableId, withVaultLock } from "./vault";
 import { decodeRef, recall } from "./retrieval";
 import { containsSecret, redactSecrets } from "./security";
+import { abstractionLevel } from "./transfer";
 import type { VaultConfig } from "./config";
 
 export type ProposalAction = "create" | "update" | "skip";
@@ -191,15 +192,26 @@ async function evidenceRecords(agentRoot: string): Promise<EvidenceRecord[]> {
 export async function selectEvidence(agentRoot: string, limit = 12): Promise<EvidenceRecord[]> {
   const reviewed = await reviewedIds(agentRoot);
   const agent = path.basename(agentRoot);
+  const byRoot = new Map<string, number>();
+  for (const record of await evidenceRecords(agentRoot)) {
+    const root = typeof record.data.rootSource === "string" ? record.data.rootSource.trim() : "";
+    if (root) byRoot.set(root, (byRoot.get(root) ?? 0) + 1);
+  }
   const candidates: { record: EvidenceRecord; score: number }[] = [];
   for (const record of await evidenceRecords(agentRoot)) {
     if (record.agent !== agent || reviewed.has(record.id)) continue;
     const isFailure = record.data.outcome === "failure" || record.data.evaluator === "fail";
+    const isSuccess = record.data.outcome === "success" && record.data.evaluator === "pass";
     const isCorrection = record.kind === "correction";
+    const isReusableEvidence = Array.isArray(record.data.appliedRefs) && record.data.appliedRefs.length > 0;
+    const root = typeof record.data.rootSource === "string" ? record.data.rootSource.trim() : "";
+    const diversity = root ? Math.min(2, byRoot.get(root) ?? 1) : 0;
     if (isFailure || isCorrection || record.kind === "case" || record.kind === "outcome") {
+      const reusableBonus = isReusableEvidence ? 1.5 : 0;
+      const transferSignal = isSuccess && isReusableEvidence ? 2 : 0;
       candidates.push({
         record,
-        score: (isFailure ? 3 : 0) + (isCorrection ? 2 : 0) + 1,
+        score: (isFailure ? 3 : 0) + (isCorrection ? 2 : 0) + transferSignal + reusableBonus + diversity * 0.3 + 1,
       });
     }
   }
@@ -265,6 +277,12 @@ export function validateProposal(p: Proposal, _agentRoot: string): { ok: boolean
   }
   if (containsSecret(p)) return { ok: false, reason: "secret in proposal" };
   if (p.scope?.match(/[\r\n]/)) return { ok: false, reason: "invalid scope" };
+  const kind = (p.targetKind ?? "experience") as string;
+  const distinctRoots = new Set(sourceRefs).size;
+  const level = abstractionLevel(kind, sourceRefs.length, distinctRoots);
+  if (level === "specific" && kind === "skill" && sourceRefs.length < 2) {
+    return { ok: false, reason: "skill requires at least two distinct sources" };
+  }
   if (p.action !== "skip") {
     if (!p.targetId || !SAFE_ID.test(p.targetId)) return { ok: false, reason: "invalid targetId" };
     if (!p.after?.trim()) return { ok: false, reason: "missing after" };

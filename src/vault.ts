@@ -160,8 +160,10 @@ export function chunkMarkdown(text: string, maxChars = 1800, overlapChars = 180)
   const { body } = parseFrontmatter(text);
   const sections = body.split(/^##\s+/m);
   const chunks: { section: string; text: string }[] = [];
+  const MAX_CHUNKS = 128;
   const step = Math.max(1, maxChars - Math.min(overlapChars, Math.floor(maxChars / 2)));
   for (const sec of sections) {
+    if (chunks.length >= MAX_CHUNKS) break;
     const content = sec.trim();
     if (!content) continue;
     const title = content.split("\n", 1)[0].slice(0, 80);
@@ -169,9 +171,14 @@ export function chunkMarkdown(text: string, maxChars = 1800, overlapChars = 180)
       chunks.push({ section: title, text: content });
       continue;
     }
-    for (let start = 0, part = 0; start < content.length; start += step, part++) {
+    for (let start = 0, part = 0; start < content.length && chunks.length < MAX_CHUNKS; start += step, part++) {
       chunks.push({ section: `${title}#${part}`, text: content.slice(start, start + maxChars) });
     }
+    if (chunks.length >= MAX_CHUNKS && content.length > maxChars) {
+      const tail = content.slice(Math.max(0, content.length - maxChars));
+      const last = chunks[chunks.length - 1];
+      if (last && last.text !== tail) last.text = tail;
+    }
   }
-  return chunks;
+  return chunks.slice(0, MAX_CHUNKS);
 }

@@ -8,6 +8,7 @@ import { chunkMarkdown, parseFrontmatter, hashContent } from "./vault";
 let embedder: any = null;
 let embedderVault: string | null = null;
 let embedderError: string | null = null;
+let embedderIsTestMock = false;
 
 export type VectorStatus = {
   available: boolean;
@@ -69,7 +70,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 export async function getEmbedder(vault: string) {
-  if (embedder && embedderVault === vault) return embedder;
+  if (embedder && (embedderIsTestMock || embedderVault === vault)) return embedder;
   const cache = vaultModelCache(vault);
   const cachedModel = path.join(cache, "Xenova", "all-MiniLM-L6-v2");
   const allowDownload = process.env.MEMORY_OFFLINE !== "1";
@@ -116,6 +117,7 @@ export function setEmbedderForTests(fn: any, vault: string) {
   embedder = fn;
   embedderVault = vault;
   embedderError = null;
+  embedderIsTestMock = true;
 }
 
 export function openIndex(agentRoot: string) {
@@ -147,7 +149,7 @@ export function ensureSchema(db: Database) {
     CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, hash TEXT, updated TEXT);
     CREATE TABLE IF NOT EXISTS chunks(
       chunk_id INTEGER PRIMARY KEY AUTOINCREMENT,
-      doc_id TEXT, path TEXT, section TEXT, kind TEXT, owner TEXT, scope TEXT, status TEXT, updated TEXT, hash TEXT, text TEXT
+      doc_id TEXT, path TEXT, section TEXT, kind TEXT, owner TEXT, scope TEXT, source_refs TEXT, status TEXT, updated TEXT, hash TEXT, text TEXT
     );
     CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(text, tokenize='porter unicode61');
     CREATE TABLE IF NOT EXISTS links(src TEXT, dst TEXT);
@@ -157,6 +159,7 @@ export function ensureSchema(db: Database) {
     CREATE INDEX IF NOT EXISTS idx_links_src ON links(src);
     CREATE INDEX IF NOT EXISTS idx_links_dst ON links(dst);
   `);
+  try { db.exec("ALTER TABLE chunks ADD COLUMN source_refs TEXT DEFAULT ''"); } catch {}
   const fp = indexFingerprint();
   const cur = db.query("SELECT value FROM meta WHERE key='fingerprint'").get() as any;
   if (cur?.value !== fp) {
@@ -264,6 +267,7 @@ async function indexFile(db: Database, vault: string, full: string, rel: string,
   const docId = meta.id ?? path.basename(full, ".md");
   const kind = meta.kind ?? "memory";
   const scope = meta.scope ?? "";
+  const sourceRefs = meta.source_refs ?? "";
   const status = meta.status ?? "active";
   const updated = meta.updated ?? new Date().toISOString();
   const owner = full.includes(`${path.sep}teams${path.sep}`) ? `team:${path.basename(path.dirname(path.dirname(full)))}` : `agent:${agent}`;
@@ -294,12 +298,12 @@ async function indexFile(db: Database, vault: string, full: string, rel: string,
     setMeta(db, "vector_error", "sqlite-vec unavailable");
   }
 
-  const insert = db.query("INSERT INTO chunks(doc_id,path,section,kind,owner,scope,status,updated,hash,text) VALUES(?,?,?,?,?,?,?,?,?,?)");
+  const insert = db.query("INSERT INTO chunks(doc_id,path,section,kind,owner,scope,source_refs,status,updated,hash,text) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
   const ftsInsert = db.query("INSERT INTO chunks_fts(rowid,text) VALUES(?,?)");
   const vectorInsert = vectors ? db.query("INSERT INTO chunk_vectors(chunk_id,embedding) VALUES(?,?)") : null;
   let vectorWriteError: string | null = null;
   for (let i = 0; i < chunks.length; i++) {
-    const r = insert.run(docId, rel, chunks[i].section, kind, owner, scope, status, updated, hash, chunks[i].text) as any;
+    const r = insert.run(docId, rel, chunks[i].section, kind, owner, scope, sourceRefs, status, updated, hash, chunks[i].text) as any;
     const id = Number(r.lastInsertRowid);
     ftsInsert.run(id, chunks[i].text);
     if (vectorInsert && vectors) {

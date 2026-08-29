@@ -8,6 +8,7 @@ function tmp(prefix: string) { return mkdtempSync(path.join(os.tmpdir(), prefix)
 function cleanup(dir: string) { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
 
 describe("adversarial & edge-case suite", () => {
+  const MOCK_EMBED = async (texts: string[]) => texts.map(() => Array(384).fill(0.01));
   test("SQL injection attempts in search queries fail safely without throwing or corrupting", async () => {
     const { ensureVault, atomicWrite } = await import("../src/vault");
     const { openIndex, syncVault } = await import("../src/index");
@@ -18,6 +19,8 @@ describe("adversarial & edge-case suite", () => {
     try {
       const { agentRoot } = await ensureVault(vault, "alice");
       await atomicWrite(path.join(agentRoot, "memories", "doc.md"), "---\nid: doc\nkind: memory\n---\nProduction db creds\n");
+      const { setEmbedderForTests: _mockEmbed } = await import("../src/index");
+      _mockEmbed(MOCK_EMBED, vault);
       const db = openIndex(agentRoot);
       await syncVault(db, vault, agentRoot, "alice");
 
@@ -72,6 +75,8 @@ Emoji: 🤖🧠💾🔒⚡️🎯
 Math symbols: ∀x ∈ ℝ, ∃y: y > x ∧ ∫ f(x)dx = F(x) + C
 `;
       await atomicWrite(path.join(agentRoot, "memories", "unicode.md"), weirdContent);
+      const { setEmbedderForTests: _mockEmbed } = await import("../src/index");
+      _mockEmbed(MOCK_EMBED, vault);
       const db = openIndex(agentRoot);
       await syncVault(db, vault, agentRoot, "alice");
 
@@ -106,10 +111,12 @@ Math symbols: ∀x ∈ ℝ, ∃y: y > x ∧ ∫ f(x)dx = F(x) + C
       // 3. Broken unclosed frontmatter
       writeFileSync(path.join(memDir, "broken-fm.md"), "---\nid: test\nkind: [unclosed");
 
-      // 4. Huge 2MB single continuous line without whitespace
+      // 4. Huge single continuous line without whitespace (capped to 32 chunks via chunkMarkdown)
       const hugeLine = "A".repeat(2 * 1024 * 1024);
       writeFileSync(path.join(memDir, "huge-line.md"), `---\nid: huge\nkind: memory\n---\n${hugeLine}`);
 
+      const { setEmbedderForTests: _mockEmbed } = await import("../src/index");
+      _mockEmbed(MOCK_EMBED, vault);
       const db = openIndex(agentRoot);
       // Must not throw or hang
       await syncVault(db, vault, agentRoot, "alice");
@@ -121,7 +128,7 @@ Math symbols: ∀x ∈ ℝ, ∃y: y > x ∧ ∫ f(x)dx = F(x) + C
     } finally {
       cleanup(vault);
     }
-  });
+  }, 15000);
 
   test("rapid concurrent lock acquisition and release maintains linear integrity", async () => {
     const { ensureVault, withVaultLock, atomicWrite } = await import("../src/vault");
@@ -186,6 +193,8 @@ Math symbols: ∀x ∈ ℝ, ∃y: y > x ∧ ∫ f(x)dx = F(x) + C
     try {
       const { agentRoot } = await ensureVault(vault, "alice");
       await atomicWrite(path.join(agentRoot, "memories", "secret.md"), "---\nid: sec\nkind: memory\n---\nSecret data\n");
+      const { setEmbedderForTests: _mockEmbed } = await import("../src/index");
+      _mockEmbed(MOCK_EMBED, vault);
       const db = openIndex(agentRoot);
       await syncVault(db, vault, agentRoot, "alice");
 

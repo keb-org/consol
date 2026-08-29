@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import type { Budgets } from "./config";
 import { RRF_K } from "./config";
 import { embedTexts, ftsSearch, vecSearch, vectorStatus } from "./index";
+import { nearDuplicateStatement, parseSourceRefCount, transferBoost } from "./transfer";
 
 export type RecallMode = "auto" | "facts" | "guidance" | "history";
 
@@ -12,6 +13,7 @@ export type PacketItem = {
   summary: string;
   section: string;
   scope: string;
+  source_refs: string;
   status: string;
   owner: string;
   rrf: number;
@@ -63,6 +65,7 @@ type ChunkRow = {
   section: string;
   kind: string;
   scope: string;
+  source_refs: string;
   status: string;
   hash: string;
   owner: string;
@@ -162,6 +165,7 @@ function toItem(row: Scored, packetId: string): PacketItem {
     summary: summaryOf(row.text, row.section),
     section: row.section,
     scope: row.scope,
+    source_refs: row.source_refs ?? "",
     status: row.status,
     owner: row.owner,
     rrf: row.rrf,
@@ -208,7 +212,7 @@ function oneHop(
     }
   }
   for (const [docId, score] of [...expansion.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 12)) {
-    const row = db.query("SELECT chunk_id, doc_id, text, section, kind, scope, status, hash, owner FROM chunks WHERE doc_id=? ORDER BY chunk_id LIMIT 1").get(docId) as ChunkRow | null;
+    const row = db.query("SELECT chunk_id, doc_id, text, section, kind, scope, source_refs, status, hash, owner FROM chunks WHERE doc_id=? ORDER BY chunk_id LIMIT 1").get(docId) as ChunkRow | null;
     if (!row || !rowAllowed(row, mode, ownerFilter, teamOwners)) continue;
     bestByDoc.set(docId, { ...row, rrf: score, source: "link" });
   }
@@ -226,6 +230,45 @@ function quotaOrder(items: PacketItem[], budgets: Budgets) {
     selected.push(item);
   }
   return selected;
+}
+
+function dedupByStatement(items: PacketItem[]): PacketItem[] {
+  const seenDoc = new Set<string>();
+  const out: PacketItem[] = [];
+  for (const item of items) {
+    if (seenDoc.has(item.docId)) continue;
+    if (out.some((kept) => nearDuplicateStatement(kept.summary, item.summary) && kept.kind === item.kind)) continue;
+    seenDoc.add(item.docId);
+    out.push(item);
+  }
+  return out;
+}
+
+function isTransferable(item: PacketItem): boolean {
+  if (item.kind === "skill" && item.status === "active") return true;
+  const n = parseSourceRefCount(item.source_refs || item.scope);
+  const roots = new Set((item.source_refs || item.scope || "").split(/[;,]/).map(v=>v.trim()).filter(Boolean)).size;
+  if (n >= 2 || roots >= 2) return true;
+  if (item.kind === "experience" && item.status !== "candidate") return true;
+  return false;
+}
+
+function boostReusable(items: PacketItem[], lexCount: number, perArmCap: number): PacketItem[] {
+  return [...items]
+    .map((item) => {
+      const sourceCount = parseSourceRefCount(item.source_refs || item.scope);
+      const distinctRoots = (item.source_refs || item.scope) ? parseSourceRefCount(item.source_refs || item.scope) : sourceCount;
+      const boost = transferBoost({
+        kind: item.kind,
+        status: item.status,
+        sourceCount,
+        distinctRoots,
+        lexicalCoverage: lexCount,
+        perArmCap,
+      });
+      return { ...item, rrf: item.rrf + boost };
+    })
+    .sort((a, b) => b.rrf - a.rrf || a.docId.localeCompare(b.docId));
 }
 
 function allocate(items: PacketItem[], target: 10 | 20 | 30, budgets: Budgets) {
@@ -255,7 +298,7 @@ export async function recall(
   const kinds = modeKinds(mode);
   const vector = vectorStatus(db);
 
-  const exactRows = db.query("SELECT chunk_id, doc_id, text, section, kind, scope, status, hash, owner FROM chunks WHERE lower(doc_id)=? ORDER BY chunk_id").all(q) as ChunkRow[];
+  const exactRows = db.query("SELECT chunk_id, doc_id, text, section, kind, scope, source_refs, status, hash, owner FROM chunks WHERE lower(doc_id)=? ORDER BY chunk_id").all(q) as ChunkRow[];
   const exact = exactRows.find((row) => rowAllowed(row, mode, ownerFilter, teams));
   if (exact) {
     const item = toItem({ ...exact, rrf: 1, source: "exact" }, id);
@@ -299,8 +342,13 @@ export async function recall(
   const authorized = fetchAuthorized(db, ids, mode, ownerFilter, teams);
   const fused = rankRows(authorized, lexRank, vecRank);
   const expanded = oneHop(fused, db, mode, ownerFilter, teams);
-  const candidates = expanded.map((row) => toItem(row, id));
-  const retrieved = candidates.slice(0, Math.max(lexRows.length, vecRows.length, targetCandidates));
+  const rawCandidates = expanded.map((row) => toItem(row, id));
+  const retrieved = rawCandidates.slice(0, Math.max(lexRows.length, vecRows.length, targetCandidates));
+  const deduped = dedupByStatement(rawCandidates);
+  const boosted = boostReusable(deduped, lexRows.length, perArm);
+  const candidates = (lexRows.length === 0 && boosted.length > 3)
+    ? [...boosted].sort((a,b)=> (Number(isTransferable(b))-Number(isTransferable(a))) || (b.rrf-a.rrf) || a.docId.localeCompare(b.docId))
+    : boosted;
   const allocated = allocate(candidates, targetCandidates, budgets);
   const packet = fitPacket({
     id,
@@ -378,7 +426,7 @@ function fetchAuthorized(
   if (!ids.length) return [];
   const unique = [...new Set(ids)];
   const placeholders = unique.map(() => "?").join(",");
-  const rows = db.query(`SELECT chunk_id, doc_id, text, section, kind, scope, status, hash, owner FROM chunks WHERE chunk_id IN (${placeholders})`).all(...unique) as ChunkRow[];
+  const rows = db.query(`SELECT chunk_id, doc_id, text, section, kind, scope, source_refs, status, hash, owner FROM chunks WHERE chunk_id IN (${placeholders})`).all(...unique) as ChunkRow[];
   const byId = new Map(rows.filter((row) => rowAllowed(row, mode, ownerFilter, teamOwners)).map((row) => [row.chunk_id, row]));
   return unique.flatMap((chunkId) => {
     const row = byId.get(chunkId);
