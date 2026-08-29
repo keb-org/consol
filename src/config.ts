@@ -49,8 +49,10 @@ export type VaultConfig = z.infer<typeof VaultConfig>;
 export function resolveConfig(argv: Record<string, string | boolean | undefined>): VaultConfig {
   const rawVault = (argv.vault as string) || process.env.MEMORY_VAULT || process.env.VAULT || path.join(os.homedir(), ".memory-vault");
   const vault = rawVault.startsWith("~")
-    ? path.resolve(os.homedir(), rawVault.slice(1).replace(/^[/\\]/, ""))
-    : path.resolve(rawVault);
+    ? path.join(os.homedir(), rawVault.slice(1).replace(/^[/\\]/, ""))
+    : path.isAbsolute(rawVault)
+      ? path.resolve(rawVault)
+      : path.resolve(process.cwd(), rawVault);
   const agent = (argv.agent as string) || process.env.MEMORY_AGENT || process.env.AGENT || process.env.USER || process.env.USERNAME || "default";
   if (!agent.trim() || agent.includes("..") || agent.includes("/") || agent.includes("\\")) {
     throw new Error(`invalid agent: ${agent}`);

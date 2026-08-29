@@ -66,11 +66,12 @@ export function frontmatter(kind: Kind, id: string, extra: Record<string, string
 }
 
 export function parseFrontmatter(text: string) {
-  if (!text.startsWith("---")) return { meta: {} as Record<string, string>, body: text };
-  const end = text.indexOf("\n---", 3);
+  const normalized = text.replace(/\r\n/g, "\n");
+  if (!normalized.startsWith("---")) return { meta: {} as Record<string, string>, body: text };
+  const end = normalized.indexOf("\n---", 3);
   if (end === -1) return { meta: {} as Record<string, string>, body: text };
-  const raw = text.slice(3, end).trim();
-  const body = text.slice(end + 4).replace(/^\n/, "");
+  const raw = normalized.slice(3, end).trim();
+  const body = normalized.slice(end + 4).replace(/^\n/, "");
   const meta: Record<string, string> = {};
   for (const line of raw.split("\n")) {
     const i = line.indexOf(":");

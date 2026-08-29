@@ -270,7 +270,7 @@ async function indexFile(db: Database, vault: string, full: string, rel: string,
   const sourceRefs = meta.source_refs ?? "";
   const status = meta.status ?? "active";
   const updated = meta.updated ?? new Date().toISOString();
-  const owner = full.includes(`${path.sep}teams${path.sep}`) ? `team:${path.basename(path.dirname(path.dirname(full)))}` : `agent:${agent}`;
+  const owner = full.replace(/\\/g, "/").includes("/teams/") ? `team:${path.basename(path.dirname(path.dirname(full)))}` : `agent:${agent}`;
 
   const old = db.query("SELECT chunk_id, doc_id FROM chunks WHERE path=?").all(rel) as { chunk_id: number; doc_id: string }[];
   for (const { chunk_id } of old) {
