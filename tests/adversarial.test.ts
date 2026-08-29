@@ -162,7 +162,7 @@ Math symbols: ∀x ∈ ℝ, ∃y: y > x ∧ ∫ f(x)dx = F(x) + C
 
       // Attempt to send message to path traversal agent target
       const evilTarget = "../../../etc/passwd";
-      await send(vault, "alice", evilTarget, "task", "payload");
+      await expect(send(vault, "alice", evilTarget, "task", "payload")).rejects.toThrow();
 
       // Attempt to read thread outside vault
       await expect(readThread(vault, "alice", "../../../../../root")).rejects.toThrow();

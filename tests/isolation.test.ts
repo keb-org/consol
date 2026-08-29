@@ -9,11 +9,11 @@ describe("isolation", () => {
     expect(decoded.h).toBe("abc123");
   });
   test("cross-bank path traversal rejected", () => {
-    const vault = "/tmp/vault";
-    const agentRoot = "/tmp/vault/agents/alice";
+    const path = require("node:path");
+    const agentRoot = path.resolve("/tmp/vault/agents/alice");
     const traversal = "../../bob/memories/hack.md";
-    const resolved = require("node:path").resolve(agentRoot, traversal);
-    expect(resolved.startsWith(vault)).toBe(false);
+    const resolved = path.resolve(agentRoot, traversal);
+    expect(resolved.startsWith(agentRoot + path.sep)).toBe(false);
   });
   test("secret patterns are blocked", async () => {
     const { remember } = await import("../src/memory");

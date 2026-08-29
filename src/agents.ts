@@ -27,7 +27,15 @@ export type ThreadEvent = {
   refs?: string[];
 };
 
+function sanitizeId(id: string) {
+  if (!id || typeof id !== "string" || id.includes("..") || id.includes("/") || id.includes("\\")) {
+    throw new Error(`invalid identifier: ${id}`);
+  }
+  return id;
+}
+
 export async function ensureAgent(vault: string, agent: string, role = "assistant") {
+  sanitizeId(agent);
   const dir = path.join(vault, "agents", agent);
   await mkdir(dir, { recursive: true });
   const file = path.join(dir, "agent.json");
@@ -40,6 +48,7 @@ export async function ensureAgent(vault: string, agent: string, role = "assistan
 }
 
 export async function ensureTeam(vault: string, team: string) {
+  sanitizeId(team);
   const dir = path.join(vault, "teams", team);
   await mkdir(dir, { recursive: true });
   for (const sub of ["memories", "experiences", "threads", "tasks", "audit"]) await mkdir(path.join(dir, sub), { recursive: true });
