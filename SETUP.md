@@ -35,6 +35,8 @@ While interacting with the user, discover your runtime in the background:
 
 ## 3. Apply Configuration
 
+Single consol MCP server covers all agents via an `agent` param — do not create `consol-linus`/`consol-ilya` duplicates.
+
 Merge the `consol` server entry into your detected MCP configuration file under `mcpServers` (preserve all existing servers):
 
 ```json
@@ -51,6 +53,8 @@ Merge the `consol` server entry into your detected MCP configuration file under 
   }
 }
 ```
+
+Tool usage is `recall(query, agent="linus"|"ilya")`, `remember(..., agent=...)`, `record(..., agent=...)`, `read(..., agent=...)`, `forget(..., agent=...)`, `send(..., agent=...)`.
 
 ---
 
