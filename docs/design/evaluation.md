@@ -24,7 +24,7 @@ Run at least:
 3. experience only;
 4. full system;
 5. full system without compiled core;
-6. full system without graph/time channels;
+6. full system without wiki-link/time channels;
 7. optional embedding variant, only if proposed.
 
 Keep constant:
@@ -93,6 +93,7 @@ For each experience track:
 ```text
 eligible
 retrieved
+packet-included
 consulted
 applied
 result after application
@@ -148,7 +149,7 @@ Required tests:
 - detaching shared library removes retrieval immediately;
 - private usage statistics do not leak into shared store;
 - redaction removes configured and common secret forms;
-- forget removes exact data, derivatives, blobs, indexes, caches, and vectors;
+- forget removes exact private data and tracked derivatives; deletes only explicitly referenced hash-named blobs with no surviving parsed reference; never rewrites binary bytes; removes derived index rows/vectors;
 - erasure audit receipt contains no erased content.
 
 Cross-agent leakage target: zero.
@@ -284,8 +285,6 @@ rebuild equivalence, and `forget` cascading erasure. No pgvector service.
    improve versus no-Caveman under equal budget.
 3. Failure transparently returns the bounded original.
 4. External gateway use is explicit opt-in with secret references only.
-
-### Add daemon only if
 
 ### Add daemon only if
 

@@ -1,94 +1,152 @@
-# consol — Agent Self-Installation & Interactive Setup Protocol
+# Consol setup
 
-> **INSTRUCTION FOR THE AI AGENT READING THIS**:  
-> You are installing and configuring `@kryat/consol` (Long-Horizon Memory MCP) in this environment.  
-> Keep the entire setup process 100% inside the chat interface. Guide the user, ask needed preferences, inspect your environment, and write the configuration autonomously.
+Install one `@kryat/consol@latest` MCP server. Server can route multiple private banks through optional `agent` argument; do not create one server per bank.
 
-**Source of Truth URL**:  
-`https://raw.githubusercontent.com/keb-org/consol/main/SETUP.md`
+## 1. Choose vault and default bank
 
----
+Ask user only when values are unknown:
 
-## 1. Interactive Chat Onboarding
+- Vault: global path such as `~/.memory-vault`, or project-local path.
+- Default agent ID: stable short ID such as `default`, `linus`, or `ilya`.
 
-When the user asks you to set up `consol`, briefly confirm what you detected and ask 2 quick questions in chat before writing config:
+Do not inspect or overwrite unrelated MCP entries. Before editing existing config, read it and preserve all servers and settings. Never copy credentials into vault, chat output, docs, or committed config.
 
-1. **Vault Storage Location**:
-   - Option A: **Global** (`~/.memory-vault`) — one persistent memory shared across all projects (Recommended).
-   - Option B: **Project-local** (`./.vault` or custom directory) — isolated strictly to this workspace.
-   - *Ask the user which they prefer, or use Global if they have no preference.*
+## 2. Configure stdio MCP
 
-2. **Agent Identity / Persona**:
-   - Ask what name or role they want to give this memory bank (e.g., `default`, `developer`, or their own name), or default cleanly to the OS user.
-
----
-
-## 2. Environment Auto-Discovery
-
-While interacting with the user, discover your runtime in the background:
-
-- **Host Client**: Find where your active client stores MCP configuration (look for MCP config files in user home directory and current workspace root).
-- **Package Runner**: Check for `bunx` or `npx` on `PATH` (prefer `bunx` for instant cold starts; fallback to `npx -y`).
-- **Transport**: Default to stdio. (Only use `--http` if running in a remote/containerized headless setup).
-
----
-
-## 3. Apply Configuration
-
-Single consol MCP server covers all agents via an `agent` param — do not create `consol-linus`/`consol-ilya` duplicates.
-
-Merge the `consol` server entry into your detected MCP configuration file under `mcpServers` (preserve all existing servers):
+Use installed `bunx` when available; otherwise `npx -y`. Example:
 
 ```json
 {
   "mcpServers": {
     "consol": {
-      "command": "<detected-runner>",
-      "args": ["@kryat/consol", "serve"],
+      "command": "bunx",
+      "args": ["@kryat/consol@latest", "serve"],
       "env": {
-        "VAULT": "<user-chosen-or-default-vault-path>",
-        "AGENT": "<user-chosen-or-default-agent-name>"
+        "VAULT": "<absolute-vault-path>",
+        "AGENT": "<default-agent-id>"
       }
     }
   }
 }
 ```
 
-Tool usage is `recall(query, agent="linus"|"ilya")`, `remember(..., agent=...)`, `record(..., agent=...)`, `read(..., agent=...)`, `forget(..., agent=...)`, `send(..., agent=...)`.
+For npm runner:
 
----
+```json
+{
+  "mcpServers": {
+    "consol": {
+      "command": "npx",
+      "args": ["-y", "@kryat/consol@latest", "serve"],
+      "env": {
+        "VAULT": "<absolute-vault-path>",
+        "AGENT": "<default-agent-id>"
+      }
+    }
+  }
+}
+```
 
-## 4. Bootstrap & Self-Check
+Default transport is stdio. Legacy `--http`/SSE exists for compatibility, not normal local setup.
 
-Run a quick health check via your shell:
+## 3. Bootstrap and verify
 
 ```bash
-<runner> @kryat/consol doctor --vault <chosen-vault-path>
+bunx @kryat/consol@latest setup --vault <absolute-vault-path> --agent <default-agent-id>
 ```
 
-Report back to the user in chat that memory is active, showing:
-- Active vault path
-- Active agent identity
-- Available tools (`recall`, `remember`, `record`, `read`, `forget`, `send`)
+```bash
+bunx @kryat/consol@latest doctor --vault <absolute-vault-path> --agent <default-agent-id>
+```
 
----
+First vector-capable setup may download pinned q8 embedding model into vault model cache. `MEMORY_OFFLINE=1` disables download; missing model then gives explicit lexical-only degradation.
 
-## 5. Operating Protocol
+Restart or reload host MCP connections after config change. Verify exactly six tools appear:
 
-Once installed, use memory autonomously throughout future conversations:
+- `recall`
+- `read`
+- `remember`
+- `record`
+- `forget`
+- `send`
 
-- **`recall(query)`**: Search memories, guidelines, and lessons before starting complex tasks.
-- **`remember(statement, scope?)`**: Permanently save user preferences, architecture decisions, and rules.
-- **`record(kind, data)`**: Log task outcomes, bug fixes, and lessons learned after completing work.
-- **`read(ref)`**: Fetch deep chunk content only when requested by recall.
-- **`forget(target, confirmation?)`**: Two-phase verified erasure.
-- **`send(to, kind, content)`**: Coordinate and share threads with other agents or team mailboxes.
+## 4. Routing
 
----
+Pass `agent` on each tool call when using non-default bank. Example domain rule:
 
-## 6. System Directive
-
-Inject this directive into your system instructions or project rules file:
 ```text
-Persistent long-horizon memory active via consol MCP tools. Recall past lessons before tasks, record outcomes after completions.
+Use agent="linus" for implementation, debugging, architecture, code review, performance, refactoring, and systems/tooling work.
+Use agent="ilya" for AI research, ML architecture, papers, hypotheses, training/scaling, and AI strategy.
+Recall from matched bank before substantive work.
 ```
+
+Agent IDs reject traversal. One process keeps separate SQLite indexes and canonical roots per bank.
+
+## 5. Host operating rule
+
+Install concise host rule where host supports project/global instructions:
+
+```text
+Persistent memory uses Consol MCP. Before substantive work, call recall on matched agent bank, semantically rerank compact descriptors, and read every plausible ref. Recall again with narrower cues when task branches, assumptions fail, evidence conflicts, context is missing, or before high-impact decisions. After work, call record with observable outcome and evaluator. Put only guidance actually applied in data.appliedRefs and repeat those refs in refs. Retrieval or read alone never means application or success.
+```
+
+Tool semantics:
+
+- `recall(query, mode?, agent?)`: bounded descriptor packet.
+- `read(ref, cursor?, agent?)`: one UTF-8 byte-bounded page; continue with returned cursor.
+- `remember(statement, scope?, refs?, agent?)`: explicit durable assertion. Exact normalized assertion deduplicates.
+- `record(kind, data, refs?, agent?)`: evidence for later reflection.
+- `forget(target, confirmation?, agent?)`: first call returns plan/token; second call only after user confirms same target.
+- `send(to, kind, content, refs?, agent?)`: durable direct/team thread message.
+
+Outcome example:
+
+```json
+{
+  "kind": "outcome",
+  "data": {
+    "task": "deploy service",
+    "observableOutcome": "smoke tests passed",
+    "outcome": "success",
+    "evaluator": "pass",
+    "appliedRefs": ["<opaque-ref-or-guidance-id>"]
+  },
+  "refs": ["<opaque-ref-or-guidance-id>"]
+}
+```
+
+Allowed outcome values: `success`, `failure`, `partial`, `unknown`. Allowed evaluator values for outcome records: `pass`, `fail`, `mixed`, `unknown`.
+
+Case records require `rootSource`, `task`, `environment`, `action`, `observableOutcome`, `outcome`, and `evaluator`; `expectation` and `appliedRefs` remain optional.
+
+## 6. Reflection scheduling
+
+Run one-shot reflection manually or through host/OS scheduler:
+
+```bash
+bunx @kryat/consol@latest reflect --once --vault <absolute-vault-path> --agent <agent-id>
+```
+
+Consol has no required daemon. MCP alone cannot force calls, observe hidden reasoning, infer application, or run while host is closed. Scheduling and reliable lifecycle capture depend on host hooks or scheduler.
+
+Reflection failures remain durable and retryable. Inferred creations remain `candidate`; model output cannot edit core, erase data, or activate inferred guidance directly.
+
+## 7. Admin recovery
+
+SQLite index is derived:
+
+```bash
+bunx @kryat/consol@latest reindex --vault <absolute-vault-path> --agent <agent-id>
+```
+
+Rollback audited semantic revision:
+
+```bash
+bunx @kryat/consol@latest rollback --revision <revision-id> --vault <absolute-vault-path> --agent <agent-id>
+```
+
+Rollback writes another revision. Rolling back a creation removes candidate note; rolling back that rollback restores it while current hash/state still matches.
+
+`forget` plans first, then confirms only after user approval. Confirmation scrubs matching private text derivatives (evidence, usage, jobs, revisions, snapshots, and messages). It deletes an explicitly referenced, hash-named blob only if no surviving parsed JSON/JSONL record references that hash; it never rewrites binary bytes. `audit/erasures.jsonl` keeps a content-free receipt with hashes/counts, never erased target.
+
+Do not reindex or migrate production vault during package-development experiments without tested backup/migration path.

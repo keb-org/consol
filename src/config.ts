@@ -10,20 +10,21 @@ export const EMBED_DIMS = 384 as const;
 export const RRF_K = 60 as const;
 
 export const Budgets = z.object({
-  coreTokens: z.number().default(900),
-  coreCeiling: z.number().default(1200),
-  packetTokens: z.number().default(1200),
-  packetCeiling: z.number().default(3000),
-  l2Bytes: z.number().default(4096),
-  perArmCap: z.number().default(20),
+  coreTokens: z.number().int().positive().default(900),
+  coreCeiling: z.number().int().positive().default(1200),
+  packetTokens: z.number().int().positive().default(3000),
+  packetCeiling: z.number().int().positive().default(3000),
+  l2Bytes: z.number().int().positive().default(4096),
+  perArmCap: z.number().int().positive().max(200).default(60),
   quotas: z.object({
-    memory: z.number().default(4),
-    experience: z.number().default(4),
-    case: z.number().default(3),
-    skill: z.number().default(2),
-    inbox: z.number().default(3),
+    memory: z.number().int().nonnegative().default(12),
+    experience: z.number().int().nonnegative().default(10),
+    case: z.number().int().nonnegative().default(6),
+    skill: z.number().int().nonnegative().default(4),
+    inbox: z.number().int().nonnegative().default(3),
   }).default({}),
-});
+}).refine((b) => b.coreTokens <= b.coreCeiling, "coreTokens exceeds coreCeiling")
+  .refine((b) => b.packetTokens <= b.packetCeiling, "packetTokens exceeds packetCeiling");
 
 export type Budgets = z.infer<typeof Budgets>;
 
@@ -51,6 +52,9 @@ export function resolveConfig(argv: Record<string, string | boolean | undefined>
     ? path.resolve(os.homedir(), rawVault.slice(1).replace(/^[/\\]/, ""))
     : path.resolve(rawVault);
   const agent = (argv.agent as string) || process.env.MEMORY_AGENT || process.env.AGENT || process.env.USER || process.env.USERNAME || "default";
+  if (!agent.trim() || agent.includes("..") || agent.includes("/") || agent.includes("\\")) {
+    throw new Error(`invalid agent: ${agent}`);
+  }
   const raw: VaultConfig = {
     vault,
     agent,
@@ -83,5 +87,5 @@ export function teamRoot(vault: string, team: string) {
 
 // Fingerprint changes force SQLite index drop and rebuild without touching canonical files.
 export function indexFingerprint() {
-  return `${MODEL_ID}@${MODEL_REVISION}:${MODEL_DTYPE}:mean:l2:${EMBED_DIMS}:chunk-v1`;
+  return `${MODEL_ID}@${MODEL_REVISION}:${MODEL_DTYPE}:mean:l2:${EMBED_DIMS}:chunk-v2-overlap180`;
 }

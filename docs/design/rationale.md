@@ -1,11 +1,12 @@
 # Design Rationale and Decision Log
 
-Status: records current reasoning, not immutable doctrine  
-Last updated: 2026-08-28
+Status: shipped decisions and measured targets; target-only behavior is labeled
+Last updated: 2026-08-29
 
-This document explains why architecture exists in its present form, what was
-rejected, and what evidence would justify changing it. Future implementation
-must preserve these arguments or explicitly replace them with stronger evidence.
+This document explains current decisions, target decisions still awaiting
+implementation or measurement, rejected alternatives, and evidence that would
+justify change. Future implementation must preserve these arguments or explicitly
+replace them with stronger evidence.
 
 ## 1. Governing principles
 
@@ -69,17 +70,19 @@ progressive disclosure, fixed packet ceilings, and promotion/demotion.
 Tools, paths, APIs, and environments change. Old operational knowledge can
 actively harm future work.
 
-Consequence: environment fingerprints, applicability scopes, staleness probes,
-version-aware invalidation, and disputed/staging fallback.
+Consequence: current status/scope filters and disputed/history behavior reduce
+some stale guidance. Environment fingerprints, compatibility probes, and
+version-aware invalidation remain target work.
 
 ### R7. Isolation is structural
 
-Asking a model to pass `bank_id` correctly is weaker than making cross-bank
-access inexpressible.
+A per-call bank selector is safe only when deterministic code validates IDs,
+resolves separate roots/indexes, and enforces owner-bound refs and team ACLs.
+Prompt instructions alone are not isolation.
 
-Consequence: agent fixed in process configuration, separate directories and
-SQLite databases, explicit read-only shared attachments, no bank selector on
-normal tools.
+Consequence: one process may route optional `agent` on all six tools, but each
+validated bank keeps a separate canonical root and SQLite index. Team access is
+explicitly attached; arbitrary peer-bank reads remain inexpressible.
 
 ### R8. Deterministic code controls authority
 
@@ -103,15 +106,15 @@ MCP is a capability protocol, not a universal conversation lifecycle bus.
 Pretending otherwise would produce an architecture that silently misses turns
 and outcomes.
 
-Consequence: protocol-neutral core, explicit MCP mode, reliable Claude Code
-hook adapter, best-effort generic Desktop mode.
+Consequence: shipped MCP instructions and setup rules remain best effort.
+Reliable automatic capture/injection requires a future host lifecycle adapter;
+manual or host/OS scheduling runs reflection today.
 
 ## 2. Architecture decision records
 
 ### ADR-001: Bun-only core
 
-**Decision:** Use Bun with `bun:sqlite`, native APIs, and likely official MCP
-SDK.
+**Decision:** Use Bun with `bun:sqlite`, native APIs, and official MCP SDK.
 
 **Why:**
 
@@ -143,8 +146,9 @@ package enough to outweigh migration cost.
 
 **Rejected:** always-on local daemon, FastAPI/Uvicorn, REST control plane.
 
-**Tradeoff:** no autonomous work after host exits. Persistent queue resumes on
-next connection; external scheduler is optional and explicit.
+**Tradeoff:** no autonomous work after host exits. Durable reflection jobs remain
+on disk; a later manual or externally scheduled `consol reflect --once` can retry
+work. External scheduler is optional and explicit.
 
 **Revisit when:** proven use case requires cross-host coordination or guaranteed
 background work while every client is closed. Even then, keep stdio adapter and
@@ -152,22 +156,26 @@ make daemon optional.
 
 ### ADR-003: Evidence journal + Markdown semantics + rebuildable SQLite
 
-**Decision:** Three roles with explicit source-of-truth boundaries.
+**Decision:** Canonical files and disposable index have explicit roles.
 
 **Why:**
 
-- journal preserves high-volume exact evidence cheaply;
-- Markdown gives inspectability, Obsidian graph, portability, and manual edits;
-- SQLite provides efficient FTS, temporal access, graph tables, queues, and
-  statistics;
-- index can be deleted/rebuilt without losing knowledge;
+- JSONL preserves exact evidence and audit events cheaply;
+- Markdown gives inspectability, Obsidian-rendered wiki-link navigation,
+  portability, and manual edits;
+- JSON stores manifests, jobs, messages, and erasure plans;
+- SQLite provides FTS, vectors, link lookup, and content-hash reconciliation;
+- index can be deleted/rebuilt without losing canonical knowledge;
 - avoids forcing raw event volume into thousands of Markdown files.
+
+Current retrieval indexes Markdown only. JSONL remains reflection input, not a
+search corpus. Temporal and queue tables are not shipped semantics.
 
 **Rejected:**
 
 - SQLite as only source: opaque and poor Obsidian interoperability;
-- Markdown as only store: weak transactional queues, FTS joins, usage counters,
-  and high-volume event ingestion;
+- Markdown as only store: weak structured journals, jobs, usage audit, and
+  high-volume event ingestion;
 - two writable canonical copies of every object: undefined conflict behavior;
 - Git as mandatory database: adds process, lock, identity, and merge burden.
 
@@ -192,22 +200,26 @@ measurable.
 
 ### ADR-005: Hybrid BM25 + vector with RRF and vault-local q8
 
-**Decision:** Baseline retrieval uses bounded BM25 (FTS5) and bounded `vec0`
-cosine (`sqlite-vec`), fused by RRF `k=60`, plus exact IDs/aliases, one-hop
-wiki links, temporal validity, and context filters. Vectors come from a pinned
-vault-local q8 model (`Xenova/all-MiniLM-L6-v2`, `q8`, rev
+**Decision:** Baseline retrieval uses bounded BM25 (FTS5) and optional bounded
+`vec0` cosine (`sqlite-vec`), fused by equal-weight RRF `k=60`, plus exact
+document IDs, one-hop wiki links, owner/status/kind filters, and deterministic
+ties. Vectors come from a pinned vault-local q8 model
+(`Xenova/all-MiniLM-L6-v2`, `q8`, rev
 `751bff37182d3f1213fa05d7196b954e230abad9`, mean pooling, L2-normalized, 384 dims,
-stored `float32`).
+stored `float32`). Alias navigation, temporal-validity filtering, and
+environment compatibility remain target work.
 
 **Why:**
 
 - lexical excels at exact identifiers/codes; vectors cover paraphrase — caps per
   arm prevent crowding before fusion; RRF avoids mixing incomparable scores;
-- q8 cuts download/memory while keeping `float32` search quality; vault-local
-  cache makes first use automatic and later use offline; fingerprint triggers
-  rebuild on model/chunker change;
-- keeps full hybrid without Postgres/pgvector: `bun:sqlite` + `sqlite-vec` is the
-  whole retrieval index and is disposable/rebuildable.
+- q8 cuts model download/memory while stored vectors remain `float32`;
+  vault-local cache makes later use offline; fingerprint triggers rebuild on
+  model/chunker change;
+- keeps hybrid retrieval without Postgres/pgvector: `bun:sqlite` + optional
+  `sqlite-vec` form one disposable/rebuildable index;
+- embedding or `sqlite-vec` failure is reported as lexical-only degradation;
+  missing vectors remain retryable and no zero-vector substitute is stored.
 
 **Rejected:** lexical-only baseline that punished paraphrase, mandatory
 pgvector/vector service, cross-encoder reranker, storing quantized vectors before
@@ -242,7 +254,7 @@ Prefer larger fixed ceiling or better section maps before adding unbounded read.
 ### ADR-007: Tiny compiled core
 
 **Decision:** Target 600–900 estimated tokens, hard ceiling around 1,200 tokens
-and 4 KiB.
+and 4 KiB. Automatic core compilation/injection is not shipped.
 
 **Why:**
 
@@ -262,12 +274,13 @@ to outweigh recurring token cost. Increase only affected quota, not whole core.
 
 ### ADR-008: Case/outcome-driven experience
 
-**Decision:** Learn experience from evaluable cases with known outcomes and
-usage attribution.
+**Decision:** Derive candidate experience from exact case/outcome/correction
+records and explicit usage attribution. Do not call it validated learning until
+held-out transfer is measured.
 
 **Why:** Similarity and transcript summaries do not tell whether an action was
-correct. Cases provide unit of evidence; outcome and rubric provide update
-signal; held-out cases test transfer.
+correct. Cases provide unit of evidence; outcome and evaluator provide update
+signal; held-out cases must test transfer.
 
 **Rejected:** create experience after every session or every apparent success.
 
@@ -279,8 +292,10 @@ better. Measure false promotion and missed learning.
 
 ### ADR-009: Experience lifecycle and conservative activation
 
-**Decision:** Candidate, staging, active, disputed, retired; core promotion is
-separate.
+**Decision:** Shipped note states include candidate, staging, active, disputed,
+retired, and superseded. Explicit internal transitions enforce allowed edges;
+`staging → active` needs two distinct successful, passing application roots.
+Automatic contradiction response and core promotion are not shipped.
 
 **Why:**
 
@@ -298,8 +313,9 @@ Statuses and separation remain.
 ### ADR-010: Six MCP tools; everything else is CLI
 
 **Decision:** `recall`, `read`, `remember`, `record`, `forget`, `send` —
-exactly six model-visible verbs. All other operations (setup/doctor/reindex/
-reflect/rollback, team attach/publish, bank CRUD, scheduling) are CLI/internal.
+exactly six model-visible verbs. Shipped CLI exposes setup, doctor, reindex,
+reflect, and rollback. Team attach APIs and lifecycle transitions are internal;
+publishing, bank CRUD, and scheduling are host/future concerns, not shipped CLI.
 
 **Why:** Each of the six survives the deletion test:
 
@@ -318,23 +334,29 @@ name (now `record`), and exposing reflection/indexing as model tools.
 **Revisit when:** a capability cannot be expressed without semantic overload.
 Prefer the CLI surface.
 
-### ADR-011: Connection-scoped bank
+### ADR-011: Single server with validated per-call bank routing
 
-**Decision:** Agent ID belongs to server command/config, not each request.
+**Decision:** One MCP server exposes optional `agent` on every tool. Missing
+`agent` uses configured default. Each validated bank gets separate canonical root,
+derived SQLite index, audit actor, and attached-team ACL.
 
-**Why:** Structural isolation, shorter tool schemas, fewer mistakes, clearer
-audit actor, and no accidental cross-agent recall.
+**Why:** Desktop hosts need one server while implementation and AI-research work
+must route to distinct private banks. One process avoids duplicate server config;
+path-safe IDs, owner-bound opaque refs, per-bank contexts, and attachment checks
+preserve isolation.
 
-**Rejected:** one global MCP process where model chooses arbitrary bank IDs.
+**Rejected:** duplicate `consol-linus`/`consol-ilya` servers and unvalidated path-like
+bank IDs.
 
-**Revisit when:** host cannot configure per-agent processes. If multiplexing is
-required, authenticate bank in host-controlled connection metadata, not
-model-controlled query.
+**Revisit when:** host supplies authenticated connection identity. Host metadata
+may then set default, but explicit routing must still pass same ACL and ownership
+checks.
 
-### ADR-012: Shared content by reference, read-only by default
+### ADR-012: Attached team content is read-only from private banks
 
-**Decision:** Attach shared libraries explicitly; preserve IDs/provenance;
-validate locally before core promotion.
+**Decision:** Team Markdown remains separately owned and enters an agent's index
+only through explicit attachment. Owner-bound refs and current attachment checks
+control reads. No reviewed publishing workflow ships yet.
 
 **Why:** Copying creates drift and destroys ownership. Writable shared memory
 allows one agent's mistaken inference to contaminate others.
@@ -346,8 +368,11 @@ rollback semantics. Private evidence must remain private by default.
 
 ### ADR-013: Model proposes; deterministic system authorizes
 
-**Decision:** Extractor gets bounded prefetched inputs and no tools. Code
-validates citations, paths, schemas, state transitions, and ACLs.
+**Decision:** Reflection runners receive bounded durable job input and return
+`create | update | skip` proposals. Code validates packet membership, exact
+evidence snapshots, current opaque refs, ownership, paths, schemas, protected
+core, and base hashes. It does not yet prove semantic citation entailment or
+recursive lineage independence.
 
 **Why:** Consolidation needs semantic judgment, but authority and safety must be
 predictable. This also makes different model providers replaceable.
@@ -366,15 +391,14 @@ need.
 Priority when available:
 
 1. MCP sampling while connected
-2. Host lifecycle / headless adapters: `claude -p`, `codex exec`
-3. Direct endpoint via `fetch` (small OpenAI-compatible mapper; add protocol
-   only when a configured endpoint needs it)
-4. Manual CLI
-5. No model — queue remains, explicit `remember`, deterministic index/mail still work
+2. Headless CLIs: `claude -p`, `codex exec`
+3. Explicitly configured endpoint via `fetch`
+4. No model — durable job remains retryable; explicit `remember`, index, and mail
+   still work
 
-No required provider SDK collection; host/OS scheduler runs
-`memory reflect --once` for one-shot offline draining. MCP sampling alone cannot
-observe whole conversations or force offline peers.
+`consol reflect --once` creates and attempts one job; host/OS scheduling is
+external. No required provider SDK collection. MCP sampling alone cannot observe
+whole conversations or force offline peers.
 
 **Rejected:** single hard-coded model path or requiring many provider SDKs in core.
 Core never gains new authority from whichever runner executes.
@@ -382,14 +406,16 @@ Core never gains new authority from whichever runner executes.
 **Revisit when:** a new host exposes stronger lifecycle events — add an adapter,
 not a new storage/learning concept.
 
-### ADR-015: Host adapter required for guaranteed autonomy
+### ADR-015: Host adapter required for reliable automatic capture
 
-**Decision:** MCP core remains portable; Claude Code hooks supply reliable
-capture/injection; generic Desktop stays best effort.
+**Decision:** Current MCP server instructions and installed host rules are best
+effort. No Consol Claude Code hook adapter ships. A future host adapter is
+required for reliable automatic capture/injection; generic MCP hosts remain
+best effort.
 
-**Why:** Current MCP server receives requested tools/resources, not universal
-host transcript and lifecycle events. It cannot force recall or rewrite host
-system prompt.
+**Why:** Current MCP server receives requested tool calls, not universal host
+transcript and lifecycle events. It cannot force recall or rewrite host system
+prompt.
 
 **Rejected:** claiming MCP instructions or sampling guarantees automatic memory.
 
@@ -412,8 +438,9 @@ semantic Markdown while evidence/index semantics remain unchanged.
 
 ### ADR-017: Environment knowledge is volatile and scoped
 
-**Decision:** Store capabilities with machine/workspace/project scope,
-fingerprint, observation, verification method, and expiry.
+**Decision:** Current notes can carry free-form `scope`, but machine/workspace/
+project fingerprints, verification methods, expiry, and live compatibility
+probes remain target work.
 
 **Why:** Operational knowledge ages differently from identity and preferences.
 Stale tool knowledge creates negative transfer.
@@ -439,68 +466,75 @@ learning loop.
 
 ### ADR-019: Filesystem is sole durable truth; SQLite is disposable projection
 
-**Decision:** Markdown/JSONL/JSON/blobs are canonical; SQLite holds only FTS,
-vectors, links, hashes, and ephemeral scheduling. One fact has one authoritative
-representation — links reference, not copy as new support. Canonical files write
-atomically first, then index syncs. Startup reconciles by content hash. Vault-
-local lock + base-hash checks prevent interleaved partial mutations; team mail
-uses append-only unique event IDs.
+**Decision:** Markdown/JSONL/JSON and optional content-addressed blobs are
+canonical; SQLite holds only FTS, vectors, links, hashes, and currently unused
+temporal schema. One fact has one authoritative representation — links reference,
+not copy as new support. Canonical files write first, then index syncs. Startup
+reconciles Markdown by content hash. Vault-local lock + base-hash checks serialize
+caught mutations; team mail uses unique event IDs. Confirmed private erasure may
+delete a hash-named blob only when an erased parsed record explicitly references
+its SHA-256 hash and no surviving parsed record references it; binary bytes are
+never decoded or rewritten.
 
-**Why:** Deleting `index.sqlite` must never lose knowledge. External Obsidian
-edits remain validated, attributed, and reindexed without crossing banks or
-activating experience alone.
+**Why:** Deleting `index.sqlite` must never lose knowledge. Markdown edits are
+reindexed on sync, but full external-edit validation/attribution and power-loss
+recovery across multi-file commits are not shipped.
 
 **Rejected:** SQLite as canonical truth, dual-writable mirrors, treating audit or
 recall traces as duplicate evidence sources.
 
 ### ADR-020: Optional Caveman packing only after bounded RAG
 
-**Decision:** When explicitly configured with a gateway, use `Cave.context.pack()`
-once at the packet boundary after retrieval/filtering/quota. Keep all originals
-and `deferredId`s locally; do not call both `context.pack()` and `compress()` by
-default. Failure returns the bounded original.
+**Decision:** When explicitly configured with a gateway, call
+`Cave.context.pack()` once at packet boundary after retrieval/filtering/quota.
+Failure returns bounded original. Packed output remains transient and original
+packet remains local. No savings claim exists without measurement.
+
+Current adapter sends query plus item summaries and metadata, bypasses packing
+for secret-shaped input, and discards secret-shaped output. It does not yet
+verify gateway `deferredId` recovery semantics, so this path remains
+experimental and default-off.
 
 **Why:** RAG already removes irrelevant material; one final lossy selection is
-enough. Packed output is transient — never canonical, never indexed, never
-evidence. Preserves exact technical fields outside the lossy transform.
+enough. Packed output must never become canonical, indexed, or evidence.
 
-**Rejected:** local compressor, dual-transform stacking, bundling
-`@caveman-ai/sdk` unconditionally, and any savings claim without measurement.
+**Rejected:** local compressor, dual-transform stacking, and any savings claim
+without measurement.
 
 ### ADR-021: Vault-local pinned q8 embeddings
 
 **Decision:** Pinned `Xenova/all-MiniLM-L6-v2` q8 at rev
 `751bff37182d3f1213fa05d7196b954e230abad9`, `mean` + L2, 384 dims, `float32` stored
 vectors in `vec0(distance_metric=cosine)`, vault-local cache under
-`<vault>/models`, lazy download on first use, offline after warmup.
+`<vault>/models`, lazy download unless `MEMORY_OFFLINE=1`, offline after warmup.
+Missing model or `sqlite-vec` yields explicit lexical-only degradation.
 
-**Why:** Automatic local setup, reproducible behavior across installs,
-portability, and leanest path to hybrid retrieval without vector service.
+**Why:** Local setup, reproducible behavior across installs, portability, and
+lean path to hybrid retrieval without vector service.
 
 **Revisit when:** another quantized conversion measurably beats this one under
 same tokenizer and held-out retrieval/task success.
 
 ### ADR-022: Durable mail for multi-agent work
 
-**Decision:** Registry + team workspace + durable threads (`send` writes a thread
-event; `recall`/`read` surfaces it). Targeted send by role/capability.
-`@caveman-ai/sdk@1.0.0` requires `Cave({ apiKey, baseURL, agent })`; `compress`
-passes through on failure; `context.pack()` is connected-only and lossy with
-`deferredId`s.
+**Decision:** Agent manifests, team workspaces, and durable message files ship.
+`send` targets explicit agent/team IDs; `recall(mode="inbox")` lists direct
+messages and `read` opens own or currently attached-team threads. Role/capability
+routing, reviewed publication, and live delivery do not ship.
 
-**Why:** Agents cooperate without sharing private banks; private publication is
-explicit and reviewed; peer messages stay attributed evidence, never truth.
+**Why:** Agents can coordinate without arbitrary peer-bank reads. Peer messages
+stay attributed messages, never automatic truth.
 
 ### ADR-023: Human-inspired behavior without biological simulation
 
-**Decision:** Implement only lean, measurable information-system behavior for
-consolidation, salience, replay, interference, source monitoring, metacognition,
-and adaptive accessibility (access/suppress/archive/delete). Exclude literal
-neuron/engram, neurotransmitter, sleep-stage simulations; never claim biological
+**Decision:** Treat consolidation, salience, replay, interference, source
+monitoring, metacognition, and adaptive accessibility as testable design
+hypotheses, not shipped biological behavior. Exclude literal neuron/engram,
+neurotransmitter, and sleep-stage simulations; never claim biological
 mechanisms.
 
 **Why:** Hypotheses help; mechanism claims mislead. Every inspired feature must
-prove held-out task value or be removed.
+prove held-out task value before shipping or remain target work.
 
 ## 3. Reference-system findings
 

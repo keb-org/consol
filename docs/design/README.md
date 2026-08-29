@@ -1,15 +1,15 @@
-# Long-Horizon Agent Memory
+# Consol Design Notes
 
-Status: master target approved; implementation follows [architecture](architecture.md)
-Last updated: 2026-08-28
+Status: shipped boundary plus measured target; see [architecture](architecture.md)
+Last updated: 2026-08-29
 
-Local, token-efficient memory and experience for Claude Code, Codex, Claude Desktop, and other MCP hosts.
+Local, token-efficient memory and experience evidence for Claude Code, Codex, Claude Desktop, and other MCP hosts.
 
-**One command** — `memory-server serve --stdio --vault <path> --agent <id>` — starts one Bun process scoped to one agent. Vault-local q8 model auto-downloads once, then retrieval runs offline. No Docker, Postgres, Redis, graph DB, daemon, HTTP server, or custom frontend.
+**One command** — `consol serve --vault <path> --agent <default-id>` — starts one Bun stdio MCP process. Optional `agent` on each tool call routes multiple private banks. Vault-local q8 model auto-downloads once when vectors are available, then retrieval runs offline. No Docker, Postgres, Redis, graph DB, required daemon, or custom frontend.
 
 | Doc | Purpose |
 |---|---|
-| [Architecture](architecture.md) | Master target: files-only truth, q8 hybrid RAG, bounded RAG, reflection, multi-agent mail, Caveman option |
+| [Architecture](architecture.md) | Shipped boundary and target: files-only truth, q8 hybrid RAG, bounded retrieval, reflection, multi-agent mail, Caveman option |
 | [Rationale](rationale.md) | Principles, ADRs, rejected alternatives, when to change them |
 | [Evaluation](evaluation.md) | What proves learning vs storage; gates for embeddings/scheduler/Caveman |
 | [Open questions](open-questions.md) | Unresolved calibration questions that need measurement |
@@ -28,17 +28,17 @@ model confidence != epistemic support
 compressed context != source truth
 ```
 
-## How it works (30 seconds)
+## How shipped flow works
 
-Evidence → cases → outcome-validated experience/procedures → bounded recall packets → future behavior. Files are durable truth (Markdown + JSONL + JSON + blobs, Obsidian-readable). SQLite is the disposable index (FTS5 + `vec0` cosine via `sqlite-vec`, links, hashes). Six tools: `recall / read / remember / record / forget / send` — everything else is CLI/internal.
+Explicit assertions become Markdown; observations/outcomes become JSONL evidence; reflection may create or update candidate notes; recall returns bounded descriptors; host reads opaque refs and explicitly records applied guidance plus outcome. SQLite is a disposable FTS5/optional-`vec0` index. Six tools: `recall / read / remember / record / forget / send` — admin stays CLI/internal.
 
 ## Retrieval
 
-Hybrid: exact IDs first, then bounded BM25 and `vec0` vector search capped independently and fused with RRF `k=60`. One-hop wiki-link expansion, type/lineage/outcome diversity, typed quotas. Progressive disclosure: `L0` ref + summary, `L1` compact overview, `L2` bounded chunk via `read`. Hard packet/core ceilings hold as history grows.
+Exact IDs run first, then bounded BM25 and optional `vec0` vector arms are capped independently and fused with equal-weight RRF `k=60`. Authorized one-hop wiki-link expansion and typed quotas feed adaptive 10/20/30 descriptor targets. Progressive disclosure: L0 summary, small current L1 overview/section cue, UTF-8 byte-bounded L2 pages via `read`.
 
-## Learning (lean, not literal neuroscience)
+## Reflection and lifecycle
 
-Fast encode (append evidence, close bounded cases) → slow consolidation (interleaved replay → scoped experience, procedures only after repeated reuse, assimilation vs accommodation) → staged validation on independent cases. Access can decay/suppress/archive; only confirmed policy/`forget` deletes. Source lineage survives relay and rebuild; peer echo counts once; retrieval never mutates truth. Human-memory ideas are functional hypotheses — keep only what proves held-out value.
+Reflection currently accepts only `create`, `update`, and `skip`; invalid or empty runs remain retryable. Inferred notes start `candidate`. Explicit lifecycle transitions can stage, activate, dispute, retire, or supersede notes; activation needs two distinct successful application roots. Semantic entailment, recursive lineage checks, automatic contradiction handling, utility decay, and demonstrated task-level transfer remain target/evaluation work. Human-memory ideas are functional hypotheses, not biological claims.
 
 ## Change discipline
 

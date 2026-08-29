@@ -21,6 +21,29 @@ describe("isolation", () => {
     const agentRoot = "/tmp/vault-test-isolation/agents/alice";
     await expect(remember(vault, agentRoot, "alice", { statement: "my key is sk-abcdefghijklmnopqrstuvwxyz123456" })).rejects.toThrow();
   });
+  test("unattached team threads stay private", async () => {
+    const { ensureAgent, ensureTeam, attachTeam, send, readThread } = await import("../src/agents");
+    const { rm } = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const { mkdtempSync } = await import("node:fs");
+    const vault = mkdtempSync(path.join(os.tmpdir(), "team-thread-acl-"));
+    try {
+      await ensureAgent(vault, "alice");
+      await ensureTeam(vault, "red");
+      const message = await send(vault, "bob", "team:red", "result", "private team result");
+      await expect(send(vault, "bob", "team:red", "result", "safe", ["Bearer fixture-send-ref-secret-123456"]))
+        .rejects.toThrow("secret rejected");
+      await expect(send(vault, "../bob", "team:red", "result", "safe")).rejects.toThrow("invalid identifier");
+      await expect(send(vault, "bob", "../red", "result", "safe")).rejects.toThrow("invalid identifier");
+      await expect(readThread(vault, "alice", message.id)).rejects.toThrow("thread not found");
+      await attachTeam(vault, "alice", "red");
+      expect((await readThread(vault, "alice", message.id)).content).toBe("private team result");
+      await expect(readThread(vault, "alice", "../../escape")).rejects.toThrow("invalid identifier");
+    } finally {
+      await rm(vault, { recursive: true, force: true }).catch(() => {});
+    }
+  });
   test("agent and team direct filesystem management", async () => {
     const { ensureAgent, ensureTeam, attachTeam, send, inbox } = await import("../src/agents");
     const { readFile, rm } = await import("node:fs/promises");

@@ -1,9 +1,9 @@
 # Open Questions and Calibration Backlog
 
-Status: unresolved calibration questions that need measurement — not spec gaps
-Last updated: 2026-08-28
+Status: unresolved calibration and implementation backlog
+Last updated: 2026-08-29
 
-These block final numeric tuning and strong claims, not the architecture itself.
+These block numeric tuning, missing safety/transfer semantics, and strong claims.
 Close each one with an experiment, then update architecture/ADRs and add a
 regression test.
 
@@ -21,10 +21,11 @@ Current: core ~600–900 tokens (ceiling ~1,200 tokens / 4 KiB), normal packet
 ablation shows larger core/packet beats retrieval at equal cost.
 
 ### Q3. Lifecycle thresholds
-Candidate → staging needs ~2 independent supports; active needs ~3 successful
-applied uses or held-out gain; core needs repeated broad value per byte.
-Calibrate against false-promotion, delayed activation, negative transfer, and
-value per byte. Statuses stay; numbers move.
+Current code permits `candidate → staging` with cited owned evidence and requires
+two distinct successful passing application roots for `staging → active`.
+Calibrate both thresholds against false promotion, delayed activation, negative
+transfer, semantic lineage independence, and value per byte. Core compilation is
+not shipped.
 
 ### Q4. Utility suppression
 When does lowering retrieval utility / suppressing from normal `recall` help vs
@@ -33,13 +34,22 @@ penalty, and reactivation by exact/history cue or later success. No age-only
 decay.
 
 ### Q5. Chunking
-Heading-aware Markdown + bounded JSONL windows with stable IDs (`id + section +
-source hash`). Verify heading parsing, overlap, chunk map coverage, and L2
-recovery across large notes/events.
+Current retrieval index chunks Markdown with overlap; JSONL evidence is not
+retrieval-indexed. Verify heading parsing, overlap, chunk coverage, and L2
+recovery across large notes. Add JSONL windows only if reflection/retrieval eval
+shows need.
 
 ### Q6. Token estimation
 Conservative byte/character heuristic with hard byte ceilings remains valid even
 if a host tokenizer is available. Never label heuristic as exact.
+
+## Missing semantics before strong learning claims
+
+- Prove proposal citations entail candidate content rather than merely naming evidence.
+- Detect recursive/cyclic lineage and shared-root contamination.
+- Validate environment/scope compatibility and contradiction handling.
+- Add process-death recovery for multi-file canonical mutations and erasure.
+- Run equal-model/equal-budget held-out task ablations and scale tests.
 
 ## Gates for optional behavior (do not implement without passing gate)
 
@@ -63,7 +73,7 @@ negative transfer. Otherwise delete it.
 - Obsidian is optional editor; filesystem is sole durable truth; `index.sqlite` is disposable.
 - Exactly six MCP tools (`recall / read / remember / record / forget / send`); admin stays CLI/internal.
 - Hybrid is BM25 (FTS5) + `vec0` cosine fused by RRF; similarity never proves support.
-- Private banks are structural; team knowledge is explicit and reviewed; peer echo counts once.
+- Private banks are structural; team knowledge is separately owned and explicitly attached. Reviewed publication and peer-lineage dedup do not ship.
 - Recall is read-only; mismatch is eligibility, not proof of wrong memory; mechanism claims are excluded.
 - Forgetting is accessibility/suppression/archive first; confirmed `forget` alone deletes.
 

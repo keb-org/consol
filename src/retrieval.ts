@@ -1,44 +1,241 @@
 import { Database } from "bun:sqlite";
 import type { Budgets } from "./config";
 import { RRF_K } from "./config";
-import { embedTexts, ftsSearch, vecSearch } from "./index";
+import { embedTexts, ftsSearch, vecSearch, vectorStatus } from "./index";
+
+export type RecallMode = "auto" | "facts" | "guidance" | "history";
 
 export type PacketItem = {
   ref: string;
   docId: string;
   kind: string;
   summary: string;
+  section: string;
   scope: string;
   status: string;
+  owner: string;
   rrf: number;
   rankLex?: number;
   rankVec?: number;
+  source: "exact" | "fused" | "link";
 };
 
 export type Packet = {
   id: string;
-  query: string;
+  mode: RecallMode;
+  targetCandidates: 10 | 20 | 30;
   items: PacketItem[];
-  l1?: { ref: string; overview: string }[];
-  attribution: { lexCapped: number; vecCapped: number; fused: number };
+  l1?: { ref: string; overview: string; section: string }[];
+  next: string;
+  attribution: {
+    lexCapped: number;
+    vecCapped: number;
+    fused: number;
+    linked: number;
+    returned: number;
+    packetBytes: number;
+    packetTokensEstimate: number;
+    vector: { available: boolean; indexed: number; reason?: string };
+    filters: { owner: string | null; statuses: string[]; kinds: string[] | null };
+  };
 };
+
+export type RetrievalUsageItem = Pick<PacketItem, "ref" | "docId" | "kind" | "owner" | "source">;
+
+// ponytail: process-local metadata avoids changing MCP packet shape; durable audit begins at MCP boundary.
+const RETRIEVAL_USAGE: unique symbol = Symbol("retrievalUsage");
+type PacketWithUsage = Packet & { [RETRIEVAL_USAGE]?: RetrievalUsageItem[] };
+
+function attachRetrievalUsage(packet: Packet, items: PacketItem[]) {
+  const usage = items.map(({ ref, docId, kind, owner, source }) => ({ ref, docId, kind, owner, source }));
+  Object.defineProperty(packet, RETRIEVAL_USAGE, { value: usage });
+  return packet;
+}
+
+export function getRetrievalUsage(packet: Packet): RetrievalUsageItem[] {
+  return (packet as PacketWithUsage)[RETRIEVAL_USAGE] ?? packet.items.map(({ ref, docId, kind, owner, source }) => ({ ref, docId, kind, owner, source }));
+}
+
+type ChunkRow = {
+  chunk_id: number;
+  doc_id: string;
+  text: string;
+  section: string;
+  kind: string;
+  scope: string;
+  status: string;
+  hash: string;
+  owner: string;
+};
+
+type Scored = ChunkRow & {
+  rrf: number;
+  rankLex?: number;
+  rankVec?: number;
+  source: PacketItem["source"];
+};
+
+const ACTIVE_STATUSES = ["active", "candidate", "staging", ""];
+const HISTORY_STATUSES = ["active", "candidate", "staging", "disputed", "retired", "suppressed", "superseded", "archived", ""];
+const GUIDANCE_KINDS = ["experience", "skill", "case", "core", "memory"];
+const FACT_KINDS = ["memory", "core", "case", "experience", "skill"];
 
 function normalize(q: string) {
   return q.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-// Encodes chunkId, docId, content hash prefix, and owner to verify ref freshness and boundary.
-function encodeRef(chunkId: number, docId: string, hash: string, owner: string) {
-  return Buffer.from(JSON.stringify({ c: chunkId, d: docId, h: hash.slice(0, 12), o: owner })).toString("base64url");
+function encodeRef(chunkId: number, docId: string, hash: string, owner: string, packetId: string) {
+  return Buffer.from(JSON.stringify({ c: chunkId, d: docId, h: hash.slice(0, 12), o: owner, p: packetId })).toString("base64url");
 }
 
 export function decodeRef(ref: string) {
-  return JSON.parse(Buffer.from(ref, "base64url").toString("utf8")) as { c: number; d: string; h: string; o: string };
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(Buffer.from(ref, "base64url").toString("utf8"));
+  } catch {
+    throw new Error("invalid ref");
+  }
+  const r = decoded as Record<string, unknown>;
+  if (
+    !Number.isSafeInteger(r.c) ||
+    typeof r.d !== "string" ||
+    typeof r.h !== "string" ||
+    typeof r.o !== "string" ||
+    (r.p !== undefined && typeof r.p !== "string")
+  ) {
+    throw new Error("invalid ref");
+  }
+  return r as { c: number; d: string; h: string; o: string; p?: string };
 }
 
-export function summaryOf(text: string) {
-  const first = text.split("\n").map((s) => s.trim()).find((s) => s.length > 20) ?? text.slice(0, 120);
-  return first.slice(0, 140).replace(/\s+/g, " ");
+export function summaryOf(text: string, section = "") {
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !/^#{1,6}\s/.test(line) && line !== "---" && !/^[\w-]+:\s/.test(line));
+  const excerpt = lines.find((line) => line.length >= 24) ?? lines[0] ?? text.trim();
+  const clean = excerpt.replace(/^[-*]\s+/, "").replace(/\s+/g, " ").slice(0, 220);
+  const heading = section.replace(/#\d+$/, "").trim();
+  return heading && !clean.toLowerCase().startsWith(heading.toLowerCase()) ? `${heading}: ${clean}`.slice(0, 240) : clean;
+}
+
+function modeKinds(mode: RecallMode) {
+  if (mode === "guidance") return GUIDANCE_KINDS;
+  if (mode === "facts") return FACT_KINDS;
+  return null;
+}
+
+function allowedOwner(owner: string, ownerFilter?: string, teamOwners = new Set<string>()) {
+  if (!ownerFilter) return true;
+  return owner === ownerFilter || teamOwners.has(owner);
+}
+
+function rowAllowed(row: Pick<ChunkRow, "owner" | "status" | "kind">, mode: RecallMode, ownerFilter?: string, teamOwners = new Set<string>()) {
+  if (!allowedOwner(row.owner, ownerFilter, teamOwners)) return false;
+  const statuses = mode === "history" ? HISTORY_STATUSES : ACTIVE_STATUSES;
+  if (!statuses.includes(row.status ?? "")) return false;
+  const kinds = modeKinds(mode);
+  return !kinds || kinds.includes(row.kind);
+}
+
+function inferTarget(query: string): 10 | 20 | 30 {
+  const words = query.trim().split(/\s+/).filter(Boolean).length;
+  const branches = (query.match(/\b(and|or|versus|vs\.?|compare|across|then|also|plus)\b|[,;:?]/gi) ?? []).length;
+  if (words >= 28 || branches >= 4) return 30;
+  if (words >= 12 || branches >= 2) return 20;
+  return 10;
+}
+
+export function packetCeilingBytes(budgets: Budgets) {
+  return Math.min(budgets.packetTokens, budgets.packetCeiling) * 4;
+}
+
+function serializedBytes(value: unknown) {
+  return Buffer.byteLength(JSON.stringify(value), "utf8");
+}
+
+function toItem(row: Scored, packetId: string): PacketItem {
+  return {
+    ref: encodeRef(row.chunk_id, row.doc_id, row.hash, row.owner, packetId),
+    docId: row.doc_id,
+    kind: row.kind,
+    summary: summaryOf(row.text, row.section),
+    section: row.section,
+    scope: row.scope,
+    status: row.status,
+    owner: row.owner,
+    rrf: row.rrf,
+    rankLex: row.rankLex,
+    rankVec: row.rankVec,
+    source: row.source,
+  };
+}
+
+function rankRows(
+  rows: ChunkRow[],
+  lexRank: Map<number, number>,
+  vecRank: Map<number, number>,
+): Scored[] {
+  return rows.map((row) => {
+    const lr = lexRank.get(row.chunk_id);
+    const vr = vecRank.get(row.chunk_id);
+    return {
+      ...row,
+      rrf: (lr === undefined ? 0 : 1 / (RRF_K + lr + 1)) + (vr === undefined ? 0 : 1 / (RRF_K + vr + 1)),
+      rankLex: lr,
+      rankVec: vr,
+      source: "fused" as const,
+    };
+  }).sort((a, b) => b.rrf - a.rrf || a.doc_id.localeCompare(b.doc_id) || a.chunk_id - b.chunk_id);
+}
+
+function oneHop(
+  seeds: Scored[],
+  db: Database,
+  mode: RecallMode,
+  ownerFilter?: string,
+  teamOwners = new Set<string>(),
+): Scored[] {
+  const bestByDoc = new Map<string, Scored>();
+  for (const seed of seeds) if (!bestByDoc.has(seed.doc_id)) bestByDoc.set(seed.doc_id, seed);
+  const expansion = new Map<string, number>();
+  for (const seed of [...bestByDoc.values()].slice(0, 8)) {
+    const links = db.query("SELECT dst FROM links WHERE src=? UNION SELECT src AS dst FROM links WHERE dst=? ORDER BY dst LIMIT 8").all(seed.doc_id, seed.doc_id) as { dst: string }[];
+    for (const { dst } of links) {
+      if (bestByDoc.has(dst)) continue;
+      const inherited = seed.rrf / 2;
+      expansion.set(dst, Math.max(expansion.get(dst) ?? 0, inherited));
+    }
+  }
+  for (const [docId, score] of [...expansion.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 12)) {
+    const row = db.query("SELECT chunk_id, doc_id, text, section, kind, scope, status, hash, owner FROM chunks WHERE doc_id=? ORDER BY chunk_id LIMIT 1").get(docId) as ChunkRow | null;
+    if (!row || !rowAllowed(row, mode, ownerFilter, teamOwners)) continue;
+    bestByDoc.set(docId, { ...row, rrf: score, source: "link" });
+  }
+  return [...bestByDoc.values()].sort((a, b) => b.rrf - a.rrf || a.doc_id.localeCompare(b.doc_id));
+}
+
+function quotaOrder(items: PacketItem[], budgets: Budgets) {
+  const quotas = budgets.quotas as Record<string, number>;
+  const selected: PacketItem[] = [];
+  const counts: Record<string, number> = {};
+  for (const item of items) {
+    const limit = Object.hasOwn(quotas, item.kind) ? quotas[item.kind] : 0;
+    if ((counts[item.kind] ?? 0) >= limit) continue;
+    counts[item.kind] = (counts[item.kind] ?? 0) + 1;
+    selected.push(item);
+  }
+  return selected;
+}
+
+function allocate(items: PacketItem[], target: 10 | 20 | 30, budgets: Budgets) {
+  const ordered = quotaOrder(items, budgets);
+  const out: PacketItem[] = [];
+  for (const item of ordered) {
+    if (out.length >= target) break;
+    out.push(item);
+  }
+  return out;
 }
 
 export async function recall(
@@ -47,141 +244,192 @@ export async function recall(
   query: string,
   budgets: Budgets,
   ownerFilter?: string,
+  mode: RecallMode = "auto",
+  teamOwners: ReadonlySet<string> = new Set(),
 ): Promise<Packet> {
   const q = normalize(query);
   const id = `pkt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  const targetCandidates = inferTarget(query);
+  const teams = new Set(teamOwners);
+  const statuses = mode === "history" ? HISTORY_STATUSES : ACTIVE_STATUSES;
+  const kinds = modeKinds(mode);
+  const vector = vectorStatus(db);
 
-  const exact = db.query("SELECT chunk_id, doc_id, text, kind, scope, status, hash, owner FROM chunks WHERE doc_id=? LIMIT 1").get(q) as any;
+  const exactRows = db.query("SELECT chunk_id, doc_id, text, section, kind, scope, status, hash, owner FROM chunks WHERE lower(doc_id)=? ORDER BY chunk_id").all(q) as ChunkRow[];
+  const exact = exactRows.find((row) => rowAllowed(row, mode, ownerFilter, teams));
   if (exact) {
-    return {
+    const item = toItem({ ...exact, rrf: 1, source: "exact" }, id);
+    const packet = fitPacket({
       id,
-      query,
-      items: [{ ref: encodeRef(exact.chunk_id, exact.doc_id, exact.hash, exact.owner), docId: exact.doc_id, kind: exact.kind, summary: summaryOf(exact.text), scope: exact.scope, status: exact.status, rrf: 1 }],
-      attribution: { lexCapped: 0, vecCapped: 0, fused: 1 },
-    };
+      mode,
+      targetCandidates,
+      items: [item],
+      next: "Exact ID resolved. Read ref for bounded detail.",
+      attribution: {
+        lexCapped: 0,
+        vecCapped: 0,
+        fused: 1,
+        linked: 0,
+        vector,
+        filters: { owner: ownerFilter ?? null, statuses, kinds },
+      },
+    }, budgets);
+    return attachRetrievalUsage(packet, [item]);
   }
 
-  const perArm = budgets.perArmCap ?? 20;
-  const lexRaw = ftsSearch(db, q, perArm * 2).slice(0, perArm);
-  let vecRaw: { chunk_id: number; distance: number }[] = [];
-  try {
-    const vec = await Promise.race([
-      embedTexts(vault, [q]),
-      new Promise<never>((_, rej) => setTimeout(() => rej(new Error("vec timeout")), 8000)),
-    ]);
-    vecRaw = vecSearch(db, vec[0], perArm * 2).slice(0, perArm);
-  } catch {}
+  const perArm = budgets.perArmCap;
+  const poolLimit = Math.max(perArm * 4, targetCandidates * 3);
+  const lexCandidates = ftsSearch(db, q, poolLimit);
+  const lexRows = fetchAuthorized(db, lexCandidates.map((row) => row.chunk_id), mode, ownerFilter, teams).slice(0, perArm);
+  const lexRank = new Map(lexRows.map((row, index) => [row.chunk_id, index]));
 
-  const lexRank = new Map<number, number>();
-  lexRaw.forEach((r, i) => lexRank.set(r.chunk_id, i));
-  const vecRank = new Map<number, number>();
-  vecRaw.forEach((r, i) => vecRank.set(r.chunk_id, i));
-
-  const allIds = new Set([...lexRank.keys(), ...vecRank.keys()]);
-  const scored: { id: number; rrf: number }[] = [];
-  for (const cid of allIds) {
-    let s = 0;
-    const lr = lexRank.get(cid);
-    if (lr !== undefined) s += 1 / (RRF_K + lr);
-    const vr = vecRank.get(cid);
-    if (vr !== undefined) s += 1 / (RRF_K + vr);
-    scored.push({ id: cid, rrf: s });
+  let vecRows: ChunkRow[] = [];
+  let vectorReason = vector.reason;
+  if (vector.available && vector.indexed > 0) {
+    try {
+      const embedded = await embedTexts(vault, [q]);
+      const candidates = vecSearch(db, embedded[0], poolLimit);
+      vecRows = fetchAuthorized(db, candidates.map((row) => row.chunk_id), mode, ownerFilter, teams).slice(0, perArm);
+    } catch (error) {
+      vectorReason = error instanceof Error ? error.message : "query embedding unavailable";
+    }
   }
-  scored.sort((a, b) => b.rrf - a.rrf);
-
-  const rows: PacketItem[] = [];
-  for (const { id: cid, rrf } of scored) {
-    const row = db.query("SELECT chunk_id, doc_id, text, kind, scope, status, hash, owner FROM chunks WHERE chunk_id=?").get(cid) as any;
-    if (!row) continue;
-    if (ownerFilter && row.owner !== ownerFilter && !row.owner.startsWith("team:")) continue;
-    if (row.status === "retired" || row.status === "suppressed") continue;
-    rows.push({
-      ref: encodeRef(row.chunk_id, row.doc_id, row.hash, row.owner),
-      docId: row.doc_id,
-      kind: row.kind,
-      summary: summaryOf(row.text),
-      scope: row.scope,
-      status: row.status,
-      rrf,
-      rankLex: lexRank.get(cid),
-      rankVec: vecRank.get(cid),
-    });
-  }
-
-  const expanded = oneHop(rows, db, budgets);
-  const diversified = diversify(expanded);
-  const capped = applyQuotas(diversified, budgets);
-
-  const l1 = capped.slice(0, 3).map((it) => ({ ref: it.ref, overview: it.summary.slice(0, 220) }));
-
-  return {
+  const vecRank = new Map(vecRows.map((row, index) => [row.chunk_id, index]));
+  const ids = [...new Set([...lexRank.keys(), ...vecRank.keys()])];
+  const authorized = fetchAuthorized(db, ids, mode, ownerFilter, teams);
+  const fused = rankRows(authorized, lexRank, vecRank);
+  const expanded = oneHop(fused, db, mode, ownerFilter, teams);
+  const candidates = expanded.map((row) => toItem(row, id));
+  const retrieved = candidates.slice(0, Math.max(lexRows.length, vecRows.length, targetCandidates));
+  const allocated = allocate(candidates, targetCandidates, budgets);
+  const packet = fitPacket({
     id,
-    query,
-    items: capped,
+    mode,
+    targetCandidates,
+    items: allocated,
+    next: "Host: rerank descriptors for current goal; read every plausibly needed ref. Recall again with narrower cues after branch, contradiction, failed assumption, or missing context.",
+    attribution: {
+      lexCapped: lexRows.length,
+      vecCapped: vecRows.length,
+      fused: fused.length,
+      linked: expanded.filter((row) => row.source === "link").length,
+      vector: { ...vector, reason: vectorReason },
+      filters: { owner: ownerFilter ?? null, statuses, kinds },
+    },
+  }, budgets);
+  return attachRetrievalUsage(packet, retrieved);
+}
+
+type PacketDraft = Omit<Packet, "l1" | "attribution"> & {
+  attribution: Omit<Packet["attribution"], "returned" | "packetBytes" | "packetTokensEstimate">;
+};
+
+function materializePacket(draft: PacketDraft, items: PacketItem[], l1Count: number): Packet {
+  const l1 = items.slice(0, l1Count).map((item) => ({
+    ref: item.ref,
+    overview: item.summary,
+    section: item.section,
+  }));
+  const packet: Packet = {
+    ...draft,
+    items,
     l1: l1.length ? l1 : undefined,
-    attribution: { lexCapped: lexRaw.length, vecCapped: vecRaw.length, fused: scored.length },
+    attribution: {
+      ...draft.attribution,
+      returned: items.length,
+      packetBytes: 0,
+      packetTokensEstimate: 0,
+    },
   };
+  for (let i = 0; i < 4; i++) {
+    const bytes = serializedBytes(packet);
+    packet.attribution.packetBytes = bytes;
+    packet.attribution.packetTokensEstimate = Math.ceil(bytes / 4);
+  }
+  return packet;
 }
 
-function oneHop(seeds: PacketItem[], db: Database, _budgets: Budgets) {
-  if (seeds.length === 0) return seeds;
-  const seedIds = new Set(seeds.map((s) => s.docId));
-  const linked = new Set<string>();
-  for (const s of seeds.slice(0, 5)) {
-    const rs = db.query("SELECT dst FROM links WHERE src=? LIMIT 5").all(s.docId) as { dst: string }[];
-    for (const r of rs) if (!seedIds.has(r.dst)) linked.add(r.dst);
+function fitPacket(draft: PacketDraft, budgets: Budgets): Packet {
+  const ceiling = packetCeilingBytes(budgets);
+  let items = draft.items.slice();
+  let l1Count = Math.min(5, items.length);
+  while (true) {
+    const packet = materializePacket(draft, items, l1Count);
+    if (packet.attribution.packetBytes <= ceiling) return packet;
+    if (l1Count > 0) {
+      l1Count--;
+      continue;
+    }
+    if (items.length) {
+      items = items.slice(0, -1);
+      continue;
+    }
+    throw new Error(`packet metadata exceeds ${ceiling}-byte ceiling`);
   }
-  for (const dst of [...linked].slice(0, 5)) {
-    const row = db.query("SELECT chunk_id, doc_id, text, kind, scope, status, hash, owner FROM chunks WHERE doc_id=? LIMIT 1").get(dst) as any;
-    if (!row || row.status === "retired") continue;
-    seeds.push({
-      ref: encodeRef(row.chunk_id, row.doc_id, row.hash, row.owner),
-      docId: row.doc_id,
-      kind: row.kind,
-      summary: summaryOf(row.text),
-      scope: row.scope,
-      status: row.status,
-      rrf: 0.01,
-    });
-  }
-  seeds.sort((a, b) => b.rrf - a.rrf);
-  return seeds;
 }
 
-function diversify(items: PacketItem[]) {
-  const seen = new Set<string>();
-  const out: PacketItem[] = [];
-  for (const it of items) {
-    const key = `${it.kind}:${it.docId}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(it);
-  }
-  return out;
+function fetchAuthorized(
+  db: Database,
+  ids: number[],
+  mode: RecallMode,
+  ownerFilter?: string,
+  teamOwners = new Set<string>(),
+): ChunkRow[] {
+  if (!ids.length) return [];
+  const unique = [...new Set(ids)];
+  const placeholders = unique.map(() => "?").join(",");
+  const rows = db.query(`SELECT chunk_id, doc_id, text, section, kind, scope, status, hash, owner FROM chunks WHERE chunk_id IN (${placeholders})`).all(...unique) as ChunkRow[];
+  const byId = new Map(rows.filter((row) => rowAllowed(row, mode, ownerFilter, teamOwners)).map((row) => [row.chunk_id, row]));
+  return unique.flatMap((chunkId) => {
+    const row = byId.get(chunkId);
+    return row ? [row] : [];
+  });
 }
 
-function applyQuotas(items: PacketItem[], budgets: Budgets) {
-  const quotas = budgets.quotas as Record<string, number>;
-  const counts: Record<string, number> = {};
-  const out: PacketItem[] = [];
-  for (const it of items) {
-    const k = it.kind in quotas ? it.kind : "memory";
-    const q = quotas[k] ?? 4;
-    counts[k] = (counts[k] ?? 0) + 1;
-    if (counts[k] > q) continue;
-    out.push(it);
-    if (out.length >= 12) break;
-  }
-  return out;
+function sliceUtf8(text: string, start: number, maxBytes: number) {
+  const bytes = Buffer.from(text, "utf8");
+  let end = Math.min(bytes.length, start + maxBytes);
+  while (end > start && end < bytes.length && (bytes[end] & 0xc0) === 0x80) end--;
+  const chunk = bytes.subarray(start, end).toString("utf8");
+  return { text: chunk, nextOffset: end, totalBytes: bytes.length };
 }
 
-export function readChunk(db: Database, ref: string, budgets: Budgets) {
-  const { c, h, o } = decodeRef(ref);
-  const row = db.query("SELECT text, doc_id, hash, owner FROM chunks WHERE chunk_id=?").get(c) as any;
+function encodeCursor(ref: string, offset: number) {
+  return Buffer.from(JSON.stringify({ r: ref, b: offset })).toString("base64url");
+}
+
+function decodeCursor(cursor: string, ref: string) {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+    if (parsed.r !== ref || !Number.isSafeInteger(parsed.b) || parsed.b < 0) throw new Error();
+    return parsed.b as number;
+  } catch {
+    throw new Error("invalid cursor");
+  }
+}
+
+export function readChunk(db: Database, ref: string, budgets: Budgets, cursor?: string) {
+  const { c, d, h, o } = decodeRef(ref);
+  const row = db.query("SELECT text, doc_id, section, hash, owner, status FROM chunks WHERE chunk_id=?").get(c) as any;
   if (!row) throw new Error("unknown ref");
-  if (o && row.owner !== o) throw new Error("ref owner mismatch");
-  if (h && row.hash.slice(0, 12) !== h) throw new Error("stale ref: content hash changed");
-  const max = budgets.l2Bytes ?? 4096;
-  const text = row.text.length > max ? row.text.slice(0, max) : row.text;
-  return { docId: row.doc_id, hash: row.hash, owner: row.owner, text };
+  if (row.doc_id !== d) throw new Error("ref document mismatch");
+  if (row.owner !== o) throw new Error("ref owner mismatch");
+  if (row.hash.slice(0, 12) !== h) throw new Error("stale ref: content hash changed");
+  const offset = cursor ? decodeCursor(cursor, ref) : 0;
+  const page = sliceUtf8(row.text, offset, budgets.l2Bytes);
+  if (offset > page.totalBytes) throw new Error("cursor past end");
+  const done = page.nextOffset >= page.totalBytes;
+  return {
+    docId: row.doc_id,
+    section: row.section,
+    hash: row.hash,
+    owner: row.owner,
+    status: row.status,
+    text: page.text,
+    bytes: Buffer.byteLength(page.text, "utf8"),
+    offset,
+    totalBytes: page.totalBytes,
+    done,
+    cursor: done ? undefined : encodeCursor(ref, page.nextOffset),
+  };
 }

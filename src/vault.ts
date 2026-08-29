@@ -1,6 +1,6 @@
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { mkdir, writeFile, readFile, rename, unlink } from "node:fs/promises";
+import { copyFile, mkdir, writeFile, readFile, rename, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 
 export type Kind = "memory" | "case" | "experience" | "skill" | "identity" | "core";
@@ -18,17 +18,35 @@ export function stableId(prefix = "") {
 export async function atomicWrite(filePath: string, content: string | Uint8Array) {
   await mkdir(path.dirname(filePath), { recursive: true });
   const tmp = `${filePath}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const backup = `${tmp}.bak`;
   if (typeof content === "string") await writeFile(tmp, content, "utf8");
-  else await writeFile(tmp, content as unknown as string);
+  else await writeFile(tmp, content);
   try {
     await rename(tmp, filePath);
-  } catch {
-    // Windows fallback if destination is briefly locked
-    try { await unlink(filePath); } catch {}
-    try { await rename(tmp, filePath); } catch {
-      if (typeof content === "string") await writeFile(filePath, content, "utf8");
-      else await writeFile(filePath, content as unknown as string);
-      try { await unlink(tmp); } catch {}
+  } catch (firstError) {
+    if (!existsSync(filePath)) {
+      await unlink(tmp).catch(() => {});
+      throw firstError;
+    }
+    // Windows cannot always replace an existing file. Preserve a byte-for-byte backup before removing it.
+    await copyFile(filePath, backup);
+    try {
+      await unlink(filePath);
+      try {
+        await rename(tmp, filePath);
+      } catch (replaceError) {
+        try {
+          await rename(backup, filePath);
+        } catch (restoreError) {
+          throw new AggregateError([replaceError, restoreError], `atomic replacement and restore failed: ${filePath}`);
+        }
+        throw replaceError;
+      }
+      await unlink(backup).catch(() => {});
+    } catch (error) {
+      await unlink(tmp).catch(() => {});
+      await unlink(backup).catch(() => {});
+      throw error;
     }
   }
 }
@@ -138,25 +156,22 @@ export function wikiLinks(text: string) {
   return out;
 }
 
-export function chunkMarkdown(text: string, maxChars = 1800, maxChunks = 32) {
+export function chunkMarkdown(text: string, maxChars = 1800, overlapChars = 180) {
   const { body } = parseFrontmatter(text);
   const sections = body.split(/^##\s+/m);
   const chunks: { section: string; text: string }[] = [];
+  const step = Math.max(1, maxChars - Math.min(overlapChars, Math.floor(maxChars / 2)));
   for (const sec of sections) {
-    const trimmed = sec.trim();
-    if (!trimmed) continue;
-    const lines = trimmed.split("\n");
-    const title = lines[0].slice(0, 80);
-    const content = trimmed;
+    const content = sec.trim();
+    if (!content) continue;
+    const title = content.split("\n", 1)[0].slice(0, 80);
     if (content.length <= maxChars) {
       chunks.push({ section: title, text: content });
-    } else {
-      for (let i = 0; i < content.length && chunks.length < maxChunks; i += maxChars) {
-        chunks.push({ section: `${title}#${Math.floor(i / maxChars)}`, text: content.slice(i, i + maxChars) });
-      }
+      continue;
     }
-    if (chunks.length >= maxChunks) break;
+    for (let start = 0, part = 0; start < content.length; start += step, part++) {
+      chunks.push({ section: `${title}#${part}`, text: content.slice(start, start + maxChars) });
+    }
   }
-  if (chunks.length === 0 && body.trim()) chunks.push({ section: "body", text: body.trim().slice(0, maxChars) });
-  return chunks.slice(0, maxChunks);
+  return chunks;
 }

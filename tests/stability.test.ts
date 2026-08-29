@@ -1,12 +1,20 @@
 import { describe, test, expect } from "bun:test";
 import path from "node:path";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 
 function tmp(prefix: string) { return mkdtempSync(path.join(os.tmpdir(), prefix)); }
 function cleanup(dir: string) { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
 
 describe("stability: vault and index invariants", () => {
+  test("chunker overlaps without dropping long-note tails", async () => {
+    const { chunkMarkdown } = await import("../src/vault");
+    const body = "0123456789".repeat(1000) + "TAIL_SENTINEL";
+    const chunks = chunkMarkdown(`---\nid: long\nkind: memory\n---\n${body}`, 100, 10);
+    expect(chunks.length).toBeGreaterThan(32);
+    expect(chunks.at(-1)?.text).toContain("TAIL_SENTINEL");
+    expect(chunks[0].text.slice(-10)).toBe(chunks[1].text.slice(0, 10));
+  });
   test("reindex is deterministic", async () => {
     const { ensureVault, atomicWrite } = await import("../src/vault");
     const { openIndex, syncVault, rebuild } = await import("../src/index");
@@ -76,22 +84,69 @@ describe("stability: vault and index invariants", () => {
     db.close(); cleanup(vault);
   }, 15000);
 
-  test("external delete reconciles chunks/fts/vectors/files", async () => {
+  test("external delete reconciles chunks/fts/vectors/files/links", async () => {
     const { ensureVault, atomicWrite } = await import("../src/vault");
     const { openIndex, syncVault } = await import("../src/index");
     const vault = tmp("stability-delete-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
-    await atomicWrite(path.join(aRoot, "memories", "to-delete.md"), "---\nid: to-delete\nkind: memory\n---\nThis will be deleted externally\n");
+    await atomicWrite(path.join(aRoot, "memories", "to-delete.md"), "---\nid: to-delete\nkind: memory\n---\nThis will be deleted externally. [[survivor]]\n");
     const db = openIndex(aRoot);
     await syncVault(db, vault, aRoot, "alice");
     expect((db.query("SELECT count(*) as n FROM chunks WHERE doc_id='to-delete'").get() as any).n).toBeGreaterThan(0);
+    expect((db.query("SELECT count(*) as n FROM links WHERE src='to-delete'").get() as any).n).toBe(1);
     const { unlink } = await import("node:fs/promises");
     await unlink(path.join(aRoot, "memories", "to-delete.md"));
     await syncVault(db, vault, aRoot, "alice");
     expect((db.query("SELECT count(*) as n FROM chunks WHERE doc_id='to-delete'").get() as any).n).toBe(0);
     expect((db.query("SELECT count(*) as n FROM files WHERE path='memories/to-delete.md'").get() as any).n).toBe(0);
+    expect((db.query("SELECT count(*) as n FROM links WHERE src='to-delete'").get() as any).n).toBe(0);
     db.close(); cleanup(vault);
+  }, 15000);
+
+  test("embedding failure stays lexical-only without zero vectors", async () => {
+    const { ensureVault, atomicWrite } = await import("../src/vault");
+    const { openIndex, syncVault, setEmbedderForTests, vectorStatus } = await import("../src/index");
+    const vault = tmp("stability-vector-degraded-");
+    await ensureVault(vault, "alice");
+    const aRoot = path.join(vault, "agents", "alice");
+    setEmbedderForTests(async () => { throw new Error("fixture embedding failure"); }, vault);
+    await atomicWrite(path.join(aRoot, "memories", "lexical.md"), "---\nid: lexical\nkind: memory\n---\nlexicalfallbackneedle\n");
+    const db = openIndex(aRoot);
+    await syncVault(db, vault, aRoot, "alice");
+    expect((db.query("SELECT count(*) AS n FROM chunks").get() as any).n).toBeGreaterThan(0);
+    try {
+      expect((db.query("SELECT count(*) AS n FROM chunk_vectors").get() as any).n).toBe(0);
+    } catch {}
+    const status = vectorStatus(db);
+    expect(status.available).toBe(false);
+    expect(status.reason).toContain("fixture embedding failure");
+    db.close(); cleanup(vault);
+  }, 15000);
+
+  test("unchanged chunks missing vectors are retried", async () => {
+    const { ensureVault, atomicWrite } = await import("../src/vault");
+    const { openIndex, syncVault, setEmbedderForTests, vectorStatus } = await import("../src/index");
+    const vault = tmp("stability-vector-retry-");
+    await ensureVault(vault, "alice");
+    const aRoot = path.join(vault, "agents", "alice");
+    setEmbedderForTests(async () => { throw new Error("temporary embedding failure"); }, vault);
+    await atomicWrite(path.join(aRoot, "memories", "retry.md"), "---\nid: retry\nkind: memory\n---\nretry vector fixture\n");
+    const db = openIndex(aRoot);
+    await syncVault(db, vault, aRoot, "alice");
+    try {
+      expect((db.query("SELECT count(*) AS n FROM chunk_vectors").get() as any).n).toBe(0);
+      setEmbedderForTests(async (texts: string[]) => ({
+        tolist: () => texts.map(() => Array(384).fill(0.01)),
+      }), vault);
+      await syncVault(db, vault, aRoot, "alice");
+      expect((db.query("SELECT count(*) AS n FROM chunk_vectors").get() as any).n).toBe(
+        (db.query("SELECT count(*) AS n FROM chunks").get() as any).n,
+      );
+      expect(vectorStatus(db).available).toBe(true);
+    } finally {
+      db.close(); cleanup(vault);
+    }
   }, 15000);
 });
 
@@ -156,6 +211,33 @@ describe("stability: retrieval under real budgets", () => {
     db.close(); cleanup(vault);
   }, 15000);
 
+  test("UTF-8 cursor pagination preserves content within byte ceiling", async () => {
+    const { ensureVault, atomicWrite } = await import("../src/vault");
+    const { openIndex, syncVault } = await import("../src/index");
+    const { recall, readChunk } = await import("../src/retrieval");
+    const { Budgets } = await import("../src/config");
+    const vault = tmp("stability-cursor-");
+    await ensureVault(vault, "alice");
+    const aRoot = path.join(vault, "agents", "alice");
+    const body = "🙂漢字abc".repeat(80);
+    await atomicWrite(path.join(aRoot, "memories", "mem-cursor.md"), `---\nid: mem-cursor\nkind: memory\n---\n${body}\n`);
+    const db = openIndex(aRoot);
+    await syncVault(db, vault, aRoot, "alice");
+    const budgets = Budgets.parse({ l2Bytes: 17 });
+    const ref = (await recall(db, vault, "mem-cursor", budgets)).items[0].ref;
+    let cursor: string | undefined;
+    let combined = "";
+    do {
+      const page = readChunk(db, ref, budgets, cursor);
+      expect(page.bytes).toBeLessThanOrEqual(17);
+      expect(page.text).not.toContain("�");
+      combined += page.text;
+      cursor = page.cursor;
+    } while (cursor);
+    expect(combined).toBe(body);
+    db.close(); cleanup(vault);
+  }, 15000);
+
   test("stale ref rejected after content changes (old chunk gone)", async () => {
     const { ensureVault, atomicWrite } = await import("../src/vault");
     const { openIndex, syncVault } = await import("../src/index");
@@ -173,6 +255,43 @@ describe("stability: retrieval under real budgets", () => {
     await atomicWrite(path.join(aRoot, "memories", `${id}.md`), `---\nid: ${id}\nkind: memory\n---\nVersion two completely different\n`);
     await syncVault(db, vault, aRoot, "alice");
     expect(() => readChunk(db, ref, Budgets.parse({}))).toThrow();
+    db.close(); cleanup(vault);
+  }, 15000);
+
+  test("adaptive candidate target follows query complexity", async () => {
+    const { ensureVault, atomicWrite } = await import("../src/vault");
+    const { openIndex, syncVault } = await import("../src/index");
+    const { recall } = await import("../src/retrieval");
+    const { Budgets } = await import("../src/config");
+    const vault = tmp("stability-adaptive-");
+    await ensureVault(vault, "alice");
+    const aRoot = path.join(vault, "agents", "alice");
+    await atomicWrite(path.join(aRoot, "memories", "mem-adaptive.md"), "---\nid: mem-adaptive\nkind: memory\n---\ndeployment architecture tradeoffs and rollback\n");
+    const db = openIndex(aRoot);
+    await syncVault(db, vault, aRoot, "alice");
+    const budgets = Budgets.parse({});
+    expect((await recall(db, vault, "deployment", budgets)).targetCandidates).toBe(10);
+    expect((await recall(db, vault, "compare deployment and rollback strategies across regions", budgets)).targetCandidates).toBe(20);
+    expect((await recall(db, vault, "compare deployment, rollback, monitoring, security, and cost across regions; then assess failures and alternatives", budgets)).targetCandidates).toBe(30);
+    db.close(); cleanup(vault);
+  }, 15000);
+
+  test("disputed guidance stays hidden outside history mode", async () => {
+    const { ensureVault, atomicWrite } = await import("../src/vault");
+    const { openIndex, syncVault } = await import("../src/index");
+    const { recall } = await import("../src/retrieval");
+    const { Budgets } = await import("../src/config");
+    const vault = tmp("stability-disputed-");
+    await ensureVault(vault, "alice");
+    const aRoot = path.join(vault, "agents", "alice");
+    await atomicWrite(
+      path.join(aRoot, "experiences", "disputed-rule.md"),
+      "---\nid: disputed-rule\nkind: experience\nstatus: disputed\n---\ndisputedneedlexyz\n",
+    );
+    const db = openIndex(aRoot);
+    await syncVault(db, vault, aRoot, "alice");
+    expect((await recall(db, vault, "disputedneedlexyz", Budgets.parse({}), "agent:alice", "guidance")).items).toHaveLength(0);
+    expect((await recall(db, vault, "disputedneedlexyz", Budgets.parse({}), "agent:alice", "history")).items[0]?.docId).toBe("disputed-rule");
     db.close(); cleanup(vault);
   }, 15000);
 
@@ -197,6 +316,38 @@ describe("stability: retrieval under real budgets", () => {
 });
 
 describe("stability: isolation and provenance", () => {
+  test("unattached and detached team notes are neither indexed nor recalled", async () => {
+    const { ensureVault, atomicWrite } = await import("../src/vault");
+    const { ensureTeam, attachTeam, getAttachedTeams } = await import("../src/agents");
+    const { openIndex, syncVault } = await import("../src/index");
+    const { recall } = await import("../src/retrieval");
+    const { Budgets } = await import("../src/config");
+    const { readFile } = await import("node:fs/promises");
+    const vault = tmp("stability-team-acl-");
+    await ensureVault(vault, "alice");
+    await ensureTeam(vault, "red");
+    await ensureTeam(vault, "blue");
+    await attachTeam(vault, "alice", "red");
+    await atomicWrite(path.join(vault, "teams", "red", "memories", "red.md"), "---\nid: red-team\nkind: memory\n---\nredteamneedle\n");
+    await atomicWrite(path.join(vault, "teams", "blue", "memories", "blue.md"), "---\nid: blue-team\nkind: memory\n---\nblueteamneedle\n");
+    const aRoot = path.join(vault, "agents", "alice");
+    const db = openIndex(aRoot);
+    await syncVault(db, vault, aRoot, "alice");
+    expect((db.query("SELECT count(*) AS n FROM chunks WHERE owner='team:red'").get() as any).n).toBeGreaterThan(0);
+    expect((db.query("SELECT count(*) AS n FROM chunks WHERE owner='team:blue'").get() as any).n).toBe(0);
+    const teams = await getAttachedTeams(vault, "alice");
+    expect((await recall(db, vault, "redteamneedle", Budgets.parse({}), "agent:alice", "auto", teams)).items.some((item) => item.docId === "red-team")).toBe(true);
+    expect((await recall(db, vault, "blueteamneedle", Budgets.parse({}), "agent:alice", "auto", teams)).items.some((item) => item.docId === "blue-team")).toBe(false);
+
+    const manifestPath = path.join(aRoot, "agent.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.teams = [];
+    await atomicWrite(manifestPath, JSON.stringify(manifest));
+    await syncVault(db, vault, aRoot, "alice");
+    expect((db.query("SELECT count(*) AS n FROM chunks WHERE owner='team:red'").get() as any).n).toBe(0);
+    db.close(); cleanup(vault);
+  }, 15000);
+
   test("cross-bank recall does not leak private content", async () => {
     const { ensureVault, atomicWrite } = await import("../src/vault");
     const { openIndex, syncVault } = await import("../src/index");
@@ -263,13 +414,169 @@ describe("stability: forgetting and lifecycle", () => {
     const db = openIndex(aRoot);
     await syncVault(db, vault, aRoot, "alice");
     expect((db.query("SELECT count(*) as n FROM chunks WHERE doc_id=?").get(id) as any).n).toBeGreaterThan(0);
+    db.query("INSERT INTO links(src,dst) VALUES(?,?), (?,?)").run(id, "other", "other", id);
+    db.query("INSERT INTO temporal(doc_id,valid_from,valid_to) VALUES(?,?,?)").run(id, "2026-01-01", null);
     const plan = await forgetPlan(vault, aRoot, id);
     expect(plan.requiresConfirmation).toBe(true);
     const res = await forgetConfirm(vault, aRoot, "alice", id, plan.token, db);
     expect(res.erased).toBeGreaterThanOrEqual(1);
     expect((db.query("SELECT count(*) as n FROM chunks WHERE doc_id=?").get(id) as any).n).toBe(0);
     expect((db.query("SELECT count(*) as n FROM files WHERE path LIKE ?").get(`%${id}%`) as any).n).toBe(0);
+    expect((db.query("SELECT count(*) as n FROM links WHERE src=? OR dst=?").get(id, id) as any).n).toBe(0);
+    expect((db.query("SELECT count(*) as n FROM temporal WHERE doc_id=?").get(id) as any).n).toBe(0);
     db.close(); cleanup(vault);
+  }, 15000);
+
+  test("forget scrubs private derivatives and receipt omits target", async () => {
+    const { ensureVault, atomicWrite, hashContent } = await import("../src/vault");
+    const { openIndex, syncVault } = await import("../src/index");
+    const { forgetPlan, forgetConfirm, record, recordConsultedUsage, recordRecallUsage } = await import("../src/memory");
+    const { Budgets } = await import("../src/config");
+    const { getRetrievalUsage, readChunk, recall } = await import("../src/retrieval");
+    const { readFile } = await import("node:fs/promises");
+    const vault = tmp("stability-forget-derivatives-");
+    await ensureVault(vault, "alice");
+    const aRoot = path.join(vault, "agents", "alice");
+    const id = "mem-private-erasure";
+    const note = path.join(aRoot, "memories", `${id}.md`);
+    await atomicWrite(note, `---\nid: ${id}\nkind: memory\n---\nprivate erasure fixture\n`);
+    const db = openIndex(aRoot);
+    await syncVault(db, vault, aRoot, "alice");
+    const packet = await recall(db, vault, id, Budgets.parse({}), "agent:alice");
+    await recordRecallUsage(vault, aRoot, "alice", packet, getRetrievalUsage(packet));
+    const chunk = readChunk(db, packet.items[0].ref, Budgets.parse({}));
+    await recordConsultedUsage(vault, aRoot, "alice", {
+      ref: packet.items[0].ref,
+      docId: chunk.docId,
+      owner: chunk.owner,
+      offset: chunk.offset,
+      packetId: packet.id,
+    });
+    const evidence = await record(vault, aRoot, "alice", {
+      kind: "outcome",
+      refs: [id],
+      data: { outcome: "success", evaluator: "pass", appliedRefs: [id] },
+    });
+    await atomicWrite(
+      path.join(aRoot, "evidence", "reviewed.jsonl"),
+      `${JSON.stringify({ evidenceId: evidence.id, jobId: "job-private", reviewedAt: new Date().toISOString() })}\n`,
+    );
+    const beforeHash = "a".repeat(64);
+    const afterHash = "b".repeat(64);
+    await atomicWrite(
+      path.join(aRoot, "audit", "revisions.jsonl"),
+      `${JSON.stringify({ id: "rev-private", targetId: id, beforeHash, afterHash, sourceRefs: [evidence.id] })}\n`,
+    );
+    await atomicWrite(path.join(aRoot, "audit", "snapshots", `${beforeHash}.md`), `before snapshot ${id}`);
+    await atomicWrite(path.join(aRoot, "audit", "snapshots", `${afterHash}.md`), `after snapshot ${id}`);
+    await atomicWrite(path.join(aRoot, "jobs", "job-private.json"), JSON.stringify({ id: "job-private", packet: { evidence: [evidence], items: packet.items } }));
+    const deletedBlob = Uint8Array.from([0, 255, 1, 254, 2]);
+    const deletedBlobHash = hashContent(deletedBlob);
+    const sharedBlob = Uint8Array.from([3, 253, 4, 252, 5]);
+    const sharedBlobHash = hashContent(sharedBlob);
+    const unrelatedBlob = Uint8Array.from([6, 251, 7, 250, 8]);
+    const unrelatedBlobHash = hashContent(unrelatedBlob);
+    await atomicWrite(path.join(aRoot, "blobs", deletedBlobHash), deletedBlob);
+    await atomicWrite(path.join(aRoot, "blobs", `${sharedBlobHash}.bin`), sharedBlob);
+    await atomicWrite(path.join(aRoot, "blobs", unrelatedBlobHash), unrelatedBlob);
+    await atomicWrite(
+      path.join(aRoot, "messages", "message-private.json"),
+      JSON.stringify({ id: "message-private", refs: [id], attachments: [deletedBlobHash, sharedBlobHash] }),
+    );
+    await atomicWrite(
+      path.join(aRoot, "messages", "message-retained.json"),
+      JSON.stringify({ id: "message-retained", refs: ["other"], attachments: [`sha256:${sharedBlobHash}`] }),
+    );
+
+    const plan = await forgetPlan(vault, aRoot, id);
+    const result = await forgetConfirm(vault, aRoot, "alice", id, plan.token, db);
+    expect(JSON.stringify(result)).not.toContain(id);
+    expect(result.derivatives).toBeGreaterThanOrEqual(7);
+    expect(await readFile(path.join(aRoot, "audit", "usage.jsonl"), "utf8")).not.toContain(id);
+    expect(await readFile(path.join(aRoot, "evidence", "reviewed.jsonl"), "utf8")).not.toContain(evidence.id);
+    expect(await readFile(path.join(aRoot, "audit", "revisions.jsonl"), "utf8")).not.toContain("rev-private");
+    expect(existsSync(path.join(aRoot, "audit", "snapshots", `${beforeHash}.md`))).toBe(false);
+    expect(existsSync(path.join(aRoot, "audit", "snapshots", `${afterHash}.md`))).toBe(false);
+    expect(existsSync(path.join(aRoot, "jobs", "job-private.json"))).toBe(false);
+    expect(await readFile(path.join(aRoot, "messages", "message-private.json"), "utf8")).not.toContain(id);
+    expect(existsSync(path.join(aRoot, "blobs", deletedBlobHash))).toBe(false);
+    expect(await readFile(path.join(aRoot, "blobs", `${sharedBlobHash}.bin`))).toEqual(Buffer.from(sharedBlob));
+    expect(await readFile(path.join(aRoot, "blobs", unrelatedBlobHash))).toEqual(Buffer.from(unrelatedBlob));
+    const receiptLines = (await readFile(path.join(aRoot, "audit", "erasures.jsonl"), "utf8")).trim().split("\n");
+    const receipt = JSON.parse(receiptLines.at(-1)!);
+    expect(receipt).toMatchObject({ id: result.receipt, agent: "alice", erased: result.erased, derivatives: result.derivatives });
+    expect(JSON.stringify(receipt)).not.toContain(id);
+    expect(receipt.targetHash).toHaveLength(64);
+    db.close(); cleanup(vault);
+  }, 15000);
+
+  test("forget preserves snapshots still referenced by retained revisions", async () => {
+    const { ensureVault, atomicWrite, hashContent } = await import("../src/vault");
+    const { forgetPlan, forgetConfirm } = await import("../src/memory");
+    const vault = tmp("stability-forget-shared-snapshot-");
+    await ensureVault(vault, "alice");
+    const aRoot = path.join(vault, "agents", "alice");
+    const id = "mem-shared-snapshot-erasure";
+    await atomicWrite(path.join(aRoot, "memories", `${id}.md`), `---\nid: ${id}\nkind: memory\n---\nshared snapshot fixture\n`);
+    const sharedContent = "shared snapshot bytes";
+    const sharedHash = hashContent(sharedContent);
+    await atomicWrite(path.join(aRoot, "audit", "snapshots", `${sharedHash}.md`), sharedContent);
+    await atomicWrite(
+      path.join(aRoot, "audit", "revisions.jsonl"),
+      [
+        JSON.stringify({ id: "rev-erased", targetId: id, beforeHash: sharedHash, afterHash: "a".repeat(64), sourceRefs: [] }),
+        JSON.stringify({ id: "rev-retained", targetId: "other", beforeHash: sharedHash, afterHash: "b".repeat(64), sourceRefs: [] }),
+      ].join("\n") + "\n",
+    );
+
+    const plan = await forgetPlan(vault, aRoot, id);
+    await forgetConfirm(vault, aRoot, "alice", id, plan.token);
+    expect(existsSync(path.join(aRoot, "audit", "snapshots", `${sharedHash}.md`))).toBe(true);
+    const revisions = await Bun.file(path.join(aRoot, "audit", "revisions.jsonl")).text();
+    expect(revisions).not.toContain("rev-erased");
+    expect(revisions).toContain("rev-retained");
+    cleanup(vault);
+  }, 15000);
+
+  test("forget follows derivative chains to fixed point", async () => {
+    const { ensureVault, atomicWrite } = await import("../src/vault");
+    const { forgetPlan, forgetConfirm } = await import("../src/memory");
+    const { readFile } = await import("node:fs/promises");
+    const vault = tmp("stability-forget-chain-");
+    await ensureVault(vault, "alice");
+    const aRoot = path.join(vault, "agents", "alice");
+    const id = "mem-chain-erasure";
+    await atomicWrite(path.join(aRoot, "memories", `${id}.md`), `---\nid: ${id}\nkind: memory\n---\nchain fixture\n`);
+    const records: string[] = [];
+    let previous = id;
+    for (let i = 0; i < 8; i++) {
+      const evidenceId = `ev-chain-${i}`;
+      records.unshift(JSON.stringify({
+        id: evidenceId,
+        at: new Date().toISOString(),
+        agent: "alice",
+        kind: "observation",
+        data: { step: i },
+        refs: [previous],
+      }));
+      previous = evidenceId;
+    }
+    await atomicWrite(path.join(aRoot, "evidence", "2026", "08.jsonl"), `${records.join("\n")}\n`);
+    const revisions = Array.from({ length: 7 }, (_, i) => JSON.stringify({
+      id: `rev-chain-${i}`,
+      targetId: `unrelated-${i}`,
+      beforeHash: String(i).repeat(64),
+      afterHash: String(i + 1).repeat(64),
+      sourceRefs: [i === 0 ? previous : `rev-chain-${i - 1}`],
+    })).reverse();
+    await atomicWrite(path.join(aRoot, "audit", "revisions.jsonl"), `${revisions.join("\n")}\n`);
+
+    const plan = await forgetPlan(vault, aRoot, id);
+    await forgetConfirm(vault, aRoot, "alice", id, plan.token);
+    const remaining = await readFile(path.join(aRoot, "evidence", "2026", "08.jsonl"), "utf8");
+    expect(remaining).toBe("");
+    expect(await readFile(path.join(aRoot, "audit", "revisions.jsonl"), "utf8")).toBe("");
+    cleanup(vault);
   }, 15000);
 
   test("forget candidate cannot escape agent root", async () => {
@@ -298,13 +605,13 @@ describe("stability: forgetting and lifecycle", () => {
     expect(validateProposal({ id: "p4", action: "create", rationale: "x", sourceRefs: ["s1"], targetId: "s1", after: "x" } as any, vault).ok).toBe(false);
     const before = "original";
     expect(validateProposal({ id: "p5", action: "update", rationale: "r", sourceRefs: ["s1"], before, baseHash: "bad", after: "new" } as any, vault).ok).toBe(false);
-    expect(validateProposal({ id: "p6", action: "update", rationale: "r", sourceRefs: ["s1"], before, baseHash: hashContent(before), after: "new" } as any, vault).ok).toBe(true);
+    expect(validateProposal({ id: "p6", action: "update", targetId: "target", rationale: "r", sourceRefs: ["s1"], before, baseHash: hashContent(before), after: "new" } as any, vault).ok).toBe(true);
     cleanup(vault);
   }, 15000);
 
-  test("stageProposals enforces baseHash", async () => {
+  test("stageProposals enforces current target hash", async () => {
     const { ensureVault, atomicWrite, hashContent } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
+    const { record } = await import("../src/memory");
     const { stageProposals } = await import("../src/reflection");
     const { readFile } = await import("node:fs/promises");
     const vault = tmp("stability-stage-");
@@ -312,16 +619,33 @@ describe("stability: forgetting and lifecycle", () => {
     const aRoot = path.join(vault, "agents", "alice");
     const id = "mem-stage-bh";
     const original = `---\nid: ${id}\nkind: memory\nstatus: candidate\n---\nOriginal\n`;
-    await atomicWrite(path.join(aRoot, "memories", `${id}.md`), original);
-    const db = openIndex(aRoot);
-    await syncVault(db, vault, aRoot, "alice");
+    const file = path.join(aRoot, "memories", `${id}.md`);
+    await atomicWrite(file, original);
+    const evidence = await record(vault, aRoot, "alice", {
+      kind: "outcome",
+      data: { outcome: "failure", evaluator: "fail", task: "deploy" },
+    });
     const jobId = "job-test-123";
-    await atomicWrite(path.join(aRoot, "jobs", `${jobId}.json`), JSON.stringify({ id: jobId, createdAt: new Date().toISOString(), status: "pending", packet: { query: "", items: [] } }));
-    await stageProposals(vault, aRoot, jobId, [{ id: "p1", action: "update", targetId: id, before: original, baseHash: "stalehash", after: "New", sourceRefs: ["s1"], rationale: "r" } as any], db);
-    expect((await readFile(path.join(aRoot, "memories", `${id}.md`), "utf8")).includes("Original")).toBe(true);
-    await stageProposals(vault, aRoot, jobId, [{ id: "p2", action: "update", targetId: id, before: original, baseHash: hashContent(original), after: "Updated", sourceRefs: ["s1"], rationale: "r" } as any], db);
-    expect((await readFile(path.join(aRoot, "memories", `${id}.md`), "utf8")).includes("Updated")).toBe(true);
-    db.close(); cleanup(vault);
+    await atomicWrite(path.join(aRoot, "jobs", `${jobId}.json`), JSON.stringify({
+      id: jobId,
+      createdAt: new Date().toISOString(),
+      status: "pending",
+      packet: { query: "", items: [], evidence: [evidence] },
+    }));
+    await atomicWrite(file, `${original}External change\n`);
+    const result = await stageProposals(vault, aRoot, jobId, [{
+      id: "p1",
+      action: "update",
+      targetId: id,
+      before: original,
+      baseHash: hashContent(original),
+      after: "Updated",
+      sourceRefs: [evidence.id],
+      rationale: "Failure narrows rule.",
+    }]);
+    expect(result).toMatchObject({ staged: 0, reviewed: 0, retryable: true });
+    expect(await readFile(file, "utf8")).toContain("External change");
+    cleanup(vault);
   }, 15000);
 });
 
@@ -340,8 +664,10 @@ describe("stability: MCP behavior and budgets", () => {
     const db = openIndex(aRoot);
     await syncVault(db, vault, aRoot, "alice");
     const pkt = await recall(db, vault, "deployment pipeline", Budgets.parse({}));
-    expect(pkt.items.length).toBeLessThanOrEqual(12);
-    expect(JSON.stringify(pkt).length).toBeLessThan(30000);
+    expect(pkt.targetCandidates).toBe(10);
+    expect(pkt.items.length).toBeLessThanOrEqual(pkt.targetCandidates);
+    expect(Buffer.byteLength(JSON.stringify(pkt), "utf8")).toBeLessThanOrEqual(12000);
+    expect(pkt.attribution.packetBytes).toBe(Buffer.byteLength(JSON.stringify(pkt), "utf8"));
     db.close(); cleanup(vault);
   }, 15000);
 
@@ -351,7 +677,10 @@ describe("stability: MCP behavior and budgets", () => {
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
     const { record } = await import("../src/memory");
-    const ops = Array.from({ length: 8 }, (_, i) => record(vault, aRoot, "alice", { kind: "case", data: { idx: i } }));
+    const ops = Array.from({ length: 8 }, (_, i) => record(vault, aRoot, "alice", {
+      kind: "observation",
+      data: { idx: i },
+    }));
     const results = await Promise.all(ops);
     expect(results.length).toBe(8);
     expect(new Set(results.map((r) => r.id)).size).toBe(8);

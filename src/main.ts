@@ -3,8 +3,8 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { resolveConfig, agentRoot, vaultModelCache } from "./config";
 import { ensureVault } from "./vault";
-import { openIndex, syncVault, rebuild } from "./index";
-import { createJob, stageProposals } from "./reflection";
+import { openIndex, syncVault, rebuild, vectorStatus } from "./index";
+import { createJob, rollbackRevision, stageProposals } from "./reflection";
 import { runReflection } from "./runners";
 import { serve } from "./mcp";
 
@@ -34,7 +34,13 @@ async function cmdDoctor(args: Record<string, string | boolean | undefined>) {
   const modelCache = vaultModelCache(config.vault);
   checks.push({ name: "modelCache", path: modelCache, exists: existsSync(modelCache) });
   checks.push({ name: "q8 model", id: "Xenova/all-MiniLM-L6-v2 q8 751bff3", ready: existsSync(path.join(modelCache, "Xenova", "all-MiniLM-L6-v2")) });
-  console.log(JSON.stringify({ config: { vault: config.vault, agent: config.agent, fingerprint: (await import("./config")).indexFingerprint() }, checks }, null, 2));
+  let vector: ReturnType<typeof vectorStatus> | undefined;
+  if (existsSync(path.join(aRoot, "index.sqlite"))) {
+    const db = openIndex(aRoot);
+    vector = vectorStatus(db);
+    db.close();
+  }
+  console.log(JSON.stringify({ config: { vault: config.vault, agent: config.agent, fingerprint: (await import("./config")).indexFingerprint() }, vector, checks }, null, 2));
 }
 
 async function cmdSetup(args: Record<string, string | boolean | undefined>) {
@@ -71,10 +77,28 @@ async function cmdReflect(args: Record<string, string | boolean | undefined>) {
   const job = await createJob(config.vault, aRoot, config, db);
   console.log(JSON.stringify({ job: job.id, packet: job.packet }, null, 2));
   if (args.once) {
-    const { proposals, runner } = await runReflection(job, config);
-    const res = await stageProposals(config.vault, aRoot, job.id, proposals, db);
-    console.log(JSON.stringify({ runner, ...res }, null, 2));
+    const { proposals, runner, diagnostics } = await runReflection(job, config);
+    const res = await stageProposals(
+      config.vault,
+      aRoot,
+      job.id,
+      proposals,
+      db,
+      { runner, diagnostics },
+    );
+    console.log(JSON.stringify({ runner, diagnostics, ...res }, null, 2));
   }
+  db.close();
+}
+
+async function cmdRollback(args: Record<string, string | boolean | undefined>) {
+  const revision = typeof args.revision === "string" ? args.revision : "";
+  if (!revision) throw new Error("--revision required");
+  const config = resolveConfig(args);
+  const { agentRoot: aRoot } = await ensureVault(config.vault, config.agent);
+  const db = openIndex(aRoot);
+  const result = await rollbackRevision(config.vault, aRoot, config.agent, revision, db);
+  console.log(JSON.stringify(result, null, 2));
   db.close();
 }
 
@@ -91,6 +115,7 @@ async function main() {
   if (cmd === "setup") { await cmdSetup(args); return; }
   if (cmd === "reindex") { await cmdReindex(args); return; }
   if (cmd === "reflect") { await cmdReflect(args); return; }
+  if (cmd === "rollback") { await cmdRollback(args); return; }
   if (cmd === "help" || cmd === "--help" || cmd === "-h" || !cmd) {
     console.log(`long-horizon-memory
 
@@ -100,6 +125,7 @@ Usage:
   consol doctor [--vault <path>] [--agent <id>]
   consol reindex [--vault <path>] [--agent <id>]
   consol reflect --once [--vault <path>] [--agent <id>]
+  consol rollback --revision <id> [--vault <path>] [--agent <id>]
 
 MCP tools (stdio by default, http via --http): recall / read / remember / record / forget / send
 Env: VAULT (or MEMORY_VAULT), AGENT (or MEMORY_AGENT), MEMORY_ENDPOINT, MEMORY_API_KEY, MEMORY_MODEL, CAVEMAN_API_KEY, CAVEMAN_BASE_URL
