@@ -35,12 +35,12 @@ While interacting with the user, discover your runtime in the background:
 
 ## 3. Apply Configuration
 
-Merge the `memory` server entry into your detected MCP configuration file under `mcpServers` (preserve all existing servers):
+Merge the `consol` server entry into your detected MCP configuration file under `mcpServers` (preserve all existing servers):
 
 ```json
 {
   "mcpServers": {
-    "memory": {
+    "consol": {
       "command": "<detected-runner>",
       "args": ["@kryat/consol", "serve"],
       "env": {

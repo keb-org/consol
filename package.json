@@ -1,6 +1,6 @@
 {
   "name": "@kryat/consol",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Long-Horizon Memory MCP runtime for AI agents",
   "type": "module",
   "main": "./src/index.ts",
