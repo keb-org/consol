@@ -21,7 +21,6 @@ export const Budgets = z.object({
     experience: z.number().int().nonnegative().default(10),
     case: z.number().int().nonnegative().default(6),
     skill: z.number().int().nonnegative().default(4),
-    inbox: z.number().int().nonnegative().default(3),
   }).default({}),
 }).refine((b) => b.coreTokens <= b.coreCeiling, "coreTokens exceeds coreCeiling")
   .refine((b) => b.packetTokens <= b.packetCeiling, "packetTokens exceeds packetCeiling");
@@ -32,11 +31,6 @@ export const VaultConfig = z.object({
   vault: z.string(),
   agent: z.string().min(1),
   budgets: Budgets.default({}),
-  caveman: z.object({
-    enabled: z.boolean().default(false),
-    apiKeyEnv: z.string().optional(),
-    baseURL: z.string().optional(),
-  }).default({ enabled: false }),
   runner: z.object({
     endpoint: z.string().optional(),
     apiKeyEnv: z.string().optional(),
@@ -47,7 +41,7 @@ export const VaultConfig = z.object({
 export type VaultConfig = z.infer<typeof VaultConfig>;
 
 export function resolveConfig(argv: Record<string, string | boolean | undefined>): VaultConfig {
-  const rawVault = (argv.vault as string) || process.env.MEMORY_VAULT || process.env.VAULT || path.join(os.homedir(), ".memory-vault");
+  const rawVault = (argv.vault as string) || process.env.CONSOL_VAULT || process.env.MEMORY_VAULT || process.env.VAULT || path.join(os.homedir(), ".consol-vault");
   const vault = rawVault.startsWith("~")
     ? path.join(os.homedir(), rawVault.slice(1).replace(/^[/\\]/, ""))
     : path.isAbsolute(rawVault)
@@ -61,15 +55,10 @@ export function resolveConfig(argv: Record<string, string | boolean | undefined>
     vault,
     agent,
     budgets: Budgets.parse({}),
-    caveman: {
-      enabled: Boolean(process.env.CAVEMAN_API_KEY && process.env.CAVEMAN_BASE_URL),
-      apiKeyEnv: process.env.CAVEMAN_API_KEY ? "CAVEMAN_API_KEY" : undefined,
-      baseURL: process.env.CAVEMAN_BASE_URL,
-    },
     runner: {
-      endpoint: process.env.MEMORY_ENDPOINT,
-      apiKeyEnv: process.env.MEMORY_API_KEY ? "MEMORY_API_KEY" : undefined,
-      model: process.env.MEMORY_MODEL,
+      endpoint: process.env.CONSOL_ENDPOINT || process.env.MEMORY_ENDPOINT,
+      apiKeyEnv: (process.env.CONSOL_API_KEY || process.env.MEMORY_API_KEY) ? (process.env.CONSOL_API_KEY ? "CONSOL_API_KEY" : "MEMORY_API_KEY") : undefined,
+      model: process.env.CONSOL_MODEL || process.env.MEMORY_MODEL,
     },
   };
   return VaultConfig.parse(raw);

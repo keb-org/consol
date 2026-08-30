@@ -8,7 +8,7 @@ import { ensureVault } from "./vault";
 import { openIndex, syncVault } from "./index";
 import { decodeRef, getRetrievalUsage, recall, readChunk, type Packet, type RecallMode, type RetrievalUsageItem } from "./retrieval";
 import { remember, record, recordConsultedUsage, recordRecallUsage, forgetPlan, forgetConfirm } from "./memory";
-import { getAttachedTeams, inbox, readThread, send } from "./agents";
+import { getAttachedTeams } from "./agents";
 import { containsSecret } from "./security";
 
 type AgentCtx = { agent: string; aRoot: string; db: Database; teamOwners: Set<string>; syncWarning?: string };
@@ -63,16 +63,11 @@ export async function createServer(
     "recall",
     {
       description: "Retrieve bounded compact candidates. Host must semantically rerank descriptors for current goal, read every plausible ref, and recall again with narrower cues after branches, contradictions, failed assumptions, missing context, or before high-impact decisions.",
-      inputSchema: { query: z.string().min(1), mode: z.enum(["auto", "facts", "guidance", "history", "inbox"]).optional(), agent: agentParam },
+      inputSchema: { query: z.string().min(1), mode: z.enum(["auto", "facts", "guidance", "history"]).optional(), agent: agentParam },
       annotations: { readOnlyHint: true, idempotentHint: true },
     },
     async ({ query, mode, agent }) => {
       const ctx = await resolveCtx(agent);
-      if (mode === "inbox") {
-        const msgs = await inbox(config.vault, ctx.agent, 8);
-        const text = JSON.stringify({ inbox: msgs, agent: ctx.agent }, null, 2);
-        return { content: [{ type: "text" as const, text }] };
-      }
       const packet = await recall(
         ctx.db,
         config.vault,
@@ -86,8 +81,7 @@ export async function createServer(
       await (usageHooks.recall
         ? usageHooks.recall(ctx, packet, retrieved)
         : recordRecallUsage(config.vault, ctx.aRoot, ctx.agent, packet, retrieved));
-      const packed = await maybePack(packet, query, { ...config, agent: ctx.agent });
-      const response = JSON.stringify({ ...packed, agent: ctx.agent, syncWarning: ctx.syncWarning }, null, 2);
+      const response = JSON.stringify({ ...packet, agent: ctx.agent, syncWarning: ctx.syncWarning }, null, 2);
       const ceiling = Math.min(config.budgets.packetTokens, config.budgets.packetCeiling) * 4;
       if (Buffer.byteLength(response, "utf8") > ceiling) {
         throw new Error(`MCP recall response exceeds ${ceiling}-byte ceiling`);
@@ -99,35 +93,28 @@ export async function createServer(
   server.registerTool(
     "read",
     {
-      description: "Read one UTF-8 byte-bounded page from a recall ref; pass returned cursor for next page. Thread IDs remain supported. Pass agent when reading team-owned refs.",
+      description: "Read one UTF-8 byte-bounded page from a recall ref; pass returned cursor for next page. Pass agent when reading team-owned refs.",
       inputSchema: { ref: z.string().min(1), cursor: z.string().optional(), agent: agentParam },
       annotations: { readOnlyHint: true, idempotentHint: true },
     },
     async ({ ref, cursor, agent }) => {
-      let decoded: ReturnType<typeof decodeRef> | null = null;
-      try { decoded = decodeRef(ref); } catch {}
-      if (decoded) {
-        const ownerAgent = decoded.o.startsWith("agent:") ? decoded.o.slice("agent:".length) : undefined;
-        const ctx = await resolveCtx(agent ?? ownerAgent);
-        const allowedOwners = new Set([`agent:${ctx.agent}`, ...ctx.teamOwners]);
-        if (!allowedOwners.has(decoded.o)) throw new Error("ref owner not attached to agent");
-        const chunk = readChunk(ctx.db, ref, config.budgets, cursor);
-        const usage = {
-          ref,
-          docId: chunk.docId,
-          owner: chunk.owner,
-          offset: chunk.offset,
-          packetId: decoded.p,
-        };
-        await (usageHooks.read
-          ? usageHooks.read(ctx, usage)
-          : recordConsultedUsage(config.vault, ctx.aRoot, ctx.agent, usage));
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ...chunk, agent: ctx.agent }, null, 2) }] };
-      }
-      if (cursor) throw new Error("cursor requires recall ref");
-      const ctx = await resolveCtx(agent);
-      const thread = await readThread(config.vault, ctx.agent, ref);
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ...thread, agent: ctx.agent }, null, 2) }] };
+      const decoded = decodeRef(ref);
+      const ownerAgent = decoded.o.startsWith("agent:") ? decoded.o.slice("agent:".length) : undefined;
+      const ctx = await resolveCtx(agent ?? ownerAgent);
+      const allowedOwners = new Set([`agent:${ctx.agent}`, ...ctx.teamOwners]);
+      if (!allowedOwners.has(decoded.o)) throw new Error("ref owner not attached to agent");
+      const chunk = readChunk(ctx.db, ref, config.budgets, cursor);
+      const usage = {
+        ref,
+        docId: chunk.docId,
+        owner: chunk.owner,
+        offset: chunk.offset,
+        packetId: decoded.p,
+      };
+      await (usageHooks.read
+        ? usageHooks.read(ctx, usage)
+        : recordConsultedUsage(config.vault, ctx.aRoot, ctx.agent, usage));
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ...chunk, agent: ctx.agent }, null, 2) }] };
     },
   );
 
@@ -176,45 +163,7 @@ export async function createServer(
     },
   );
 
-  server.registerTool(
-    "send",
-    {
-      description: "Send durable thread message to agent or team. No arbitrary peer-bank reads; agent is sender.",
-      inputSchema: { to: z.string().min(1), kind: z.enum(["question", "reply", "task", "result", "handoff"]), content: z.string().min(1), refs: z.array(z.string()).optional(), agent: agentParam },
-    },
-    async ({ to, kind, content, refs, agent }) => {
-      const ctx = await resolveCtx(agent);
-      const ev = await send(config.vault, ctx.agent, to, kind, content, refs);
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ...ev, from: ctx.agent }, null, 2) }] };
-    },
-  );
-
   return { server, config, db: defaultCtx.db, aRoot: defaultCtx.aRoot, ctxCache, resolveCtx };
-}
-
-export async function maybePack(
-  packet: Packet,
-  query: string,
-  config: ReturnType<typeof resolveConfig>,
-  pack?: (query: string, items: unknown[]) => Promise<any>,
-) {
-  if (!config.caveman.enabled || containsSecret({ query, items: packet.items })) return packet;
-  const apiKey = config.caveman.apiKeyEnv ? process.env[config.caveman.apiKeyEnv] : undefined;
-  const baseURL = config.caveman.baseURL;
-  if (!pack && (!apiKey || !baseURL)) return packet;
-  try {
-    const items = packet.items.map((item) => ({ id: item.ref, text: item.summary, meta: item }));
-    let result: any;
-    if (pack) result = await pack(query, items);
-    else {
-      const { Cave } = await import("@caveman-ai/sdk");
-      const cave = new Cave({ apiKey: apiKey!, baseURL: baseURL!, agent: config.agent });
-      result = await (cave.context as any).pack(query, items, {});
-    }
-    if (containsSecret(result)) return packet;
-    if (result?.packed) return { ...packet, packed: result.packed, deferredIds: result.deferredIds };
-  } catch {}
-  return packet;
 }
 
 export async function serve(argv: Record<string, string | boolean | undefined>) {

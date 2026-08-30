@@ -11,9 +11,12 @@ export type ReflectionRunResult = {
   diagnostics: string[];
 };
 
-const SYSTEM = `You are a memory reflection assistant. Given exact unreviewed evidence and related memory, propose precise candidate patches.
-Return JSON: {"proposals":[{"id":"...","action":"create|update|skip","targetKind":"memory|case|experience|skill","targetId":"...","before":"...","after":"...","baseHash":"...","sourceRefs":["..."],"scope":"...","expectedEffect":"...","disconfirming":"...","alternatives":"...","rationale":"..."}]}
-Rules: address every evidence record, cite its exact evidence ID, cite only refs present in packet, no secrets, no erasure, no direct core edits or promotion, self-citation invalid, confidence is not truth. Use skip with evidence refs and rationale when no durable patch is warranted.`;
+const SYSTEM = `You are a memory reflection assistant following strict Caveman compression rules:
+1. Distill unreviewed evidence and related memory into precise, compressed candidate patches.
+2. Cut filler, pleasantries, articles (a, an, the), and conversational fluff. Use short synonyms and terse imperative sentences.
+3. Preserve verbatim: code blocks, inline code, IDs, numbers, file paths, and URLs.
+4. Return JSON: {"proposals":[{"id":"...","action":"create|update|skip","targetKind":"memory|case|experience|skill","targetId":"...","before":"...","after":"...","baseHash":"...","sourceRefs":["..."],"scope":"...","expectedEffect":"...","disconfirming":"...","alternatives":"...","rationale":"..."}]}
+5. Address every evidence record, cite exact evidence ID, cite only refs present in packet, no secrets, no erasure, no direct core edits or promotion, self-citation invalid, confidence is not truth. Use skip with evidence refs and rationale when no durable patch is warranted.`;
 
 function jobPrompt(job: Job) {
   return JSON.stringify({ packet: job.packet, instructions: SYSTEM }, null, 2);

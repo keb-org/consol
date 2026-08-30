@@ -157,9 +157,9 @@ Math symbols: ∀x ∈ ℝ, ∃y: y > x ∧ ∫ f(x)dx = F(x) + C
     }
   });
 
-  test("path traversal attacks on memory and message APIs are blocked", async () => {
+  test("path traversal attacks on agent and memory APIs are blocked", async () => {
     const { ensureVault } = await import("../src/vault");
-    const { send, readThread } = await import("../src/agents");
+    const { ensureAgent, attachTeam } = await import("../src/agents");
     const { forgetPlan } = await import("../src/memory");
 
     const vault = tmp("adv-traversal-");
@@ -167,12 +167,10 @@ Math symbols: ∀x ∈ ℝ, ∃y: y > x ∧ ∫ f(x)dx = F(x) + C
       const { agentRoot } = await ensureVault(vault, "alice");
       await ensureVault(vault, "bob");
 
-      // Attempt to send message to path traversal agent target
+      // Attempt agent path traversal
       const evilTarget = "../../../etc/passwd";
-      await expect(send(vault, "alice", evilTarget, "task", "payload")).rejects.toThrow();
-
-      // Attempt to read thread outside vault
-      await expect(readThread(vault, "alice", "../../../../../root")).rejects.toThrow();
+      await expect(ensureAgent(vault, evilTarget)).rejects.toThrow();
+      await expect(attachTeam(vault, "alice", evilTarget)).rejects.toThrow();
 
       // Attempt to forget via relative path
       const evilDocId = "../../../system32/cmd.exe";

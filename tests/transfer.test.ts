@@ -14,13 +14,13 @@ describe("transfer invariants", () => {
     const vault = mkdtempSync(path.join(os.tmpdir(), "watermelon-invariants-"));
     try {
       const { agentRoot } = await ensureVault(vault, "alice");
-      await remember(vault, agentRoot, "alice", { statement: "Grow wheat: irrigate deeply, mulch, stagger sowings." });
-      await remember(vault, agentRoot, "alice", { statement: "Grow strawberry: irrigate deeply, mulch for moisture." });
-      await atomicWrite(path.join(agentRoot, "skills", "irrigate-principle.md"), `---\nid: irrigate-principle\nkind: skill\nstatus: active\nsource_refs: wheat-case, strawberry-case\n---\nIrrigate deeply and mulch to retain moisture.\n`);
+      await remember(vault, agentRoot, "alice", { statement: "Grow 🍌 banana: irrigate deeply, mulch, stagger sowings." });
+      await remember(vault, agentRoot, "alice", { statement: "Grow 🍓 strawberry: irrigate deeply, mulch for moisture." });
+      await atomicWrite(path.join(agentRoot, "skills", "irrigate-principle.md"), `---\nid: irrigate-principle\nkind: skill\nstatus: active\nsource_refs: banana-case, strawberry-case\n---\nIrrigate deeply and mulch to retain moisture.\n`);
       const db = openIndex(agentRoot);
       await syncVault(db, vault, agentRoot, "alice");
       const budgets = Budgets.parse({ perArmCap: 12, quotas: { memory: 8, experience: 8, case: 4, skill: 8 } });
-      const packet = await recall(db, vault, "how to grow watermelon", budgets, "agent:alice");
+      const packet = await recall(db, vault, "how to grow 🍉 watermelon", budgets, "agent:alice");
       expect(packet.items.some((item) => item.docId === "irrigate-principle")).toBe(true);
       db.close();
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -30,8 +30,8 @@ describe("transfer invariants", () => {
   }, 15000);
 
   test("nearDuplicate compresses but does not collapse distinct tasks", () => {
-    expect(nearDuplicateStatement("Grow wheat: irrigate deeply, mulch, stagger sowings.", "Grow wheat irrigate deeply, mulch, stagger sowings")).toBe(true);
-    expect(nearDuplicateStatement("Grow wheat: irrigate deeply, mulch", "Grow watermelon: irrigate deeply, mulch")).toBe(false);
+    expect(nearDuplicateStatement("Grow 🍌 banana: irrigate deeply, mulch, stagger sowings.", "Grow 🍌 banana irrigate deeply, mulch, stagger sowings")).toBe(true);
+    expect(nearDuplicateStatement("Grow 🍌 banana: irrigate deeply, mulch", "Grow 🍉 watermelon: irrigate deeply, mulch")).toBe(false);
   });
 
   test("token efficiency: reusable principle has higher valuePerToken than one-offs", () => {

@@ -73,15 +73,10 @@ export async function getEmbedder(vault: string) {
   if (embedder && (embedderIsTestMock || embedderVault === vault)) return embedder;
   const cache = vaultModelCache(vault);
   const cachedModel = path.join(cache, "Xenova", "all-MiniLM-L6-v2");
-  const allowDownload = process.env.MEMORY_OFFLINE !== "1";
-  if (!existsSync(cachedModel) && !allowDownload) {
-    embedderError = "model missing while MEMORY_OFFLINE=1";
-    throw new Error(embedderError);
-  }
   try {
     const { env, pipeline } = await import("@huggingface/transformers");
     env.cacheDir = cache;
-    env.allowRemoteModels = allowDownload;
+    env.allowRemoteModels = true;
     embedder = await withTimeout(
       pipeline("feature-extraction", MODEL_ID, { dtype: MODEL_DTYPE as any, revision: MODEL_REVISION } as any),
       existsSync(cachedModel) ? 30_000 : 300_000,

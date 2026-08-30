@@ -28,7 +28,7 @@ Agent host / OS scheduler
 - No Docker, no Postgres/pgvector, no Redis, no graph DB, no web UI, no required daemon.
 - Obsidian is an optional editor over the vault, never a runtime dependency.
 - Canonical state is files. SQLite is a derived, rebuildable index. Deleting `index.sqlite` must not lose knowledge.
-- First use initializes vault and index. Vector-capable setup/recall lazily downloads pinned q8 model unless `MEMORY_OFFLINE=1`; after cache warmup, vector indexing and retrieval run offline. Missing model or `sqlite-vec` is explicit lexical-only degradation.
+- First use initializes vault and index. Setup downloads pinned q8 model into vault-local cache; after cache warmup, vector indexing and retrieval run 100% offline. Missing `sqlite-vec` gives explicit lexical-only degradation.
 - Learning means held-out future tasks improve under equal model, tools, environment, and context budget. Storage count, summary polish, similarity, and model confidence are not learning.
 
 Related: [README](README.md) · [Rationale](rationale.md) · [Evaluation](evaluation.md) · [Open questions](open-questions.md)
@@ -59,7 +59,6 @@ compressed context != source truth
   - `@modelcontextprotocol/sdk` + `zod` for MCP
   - `@huggingface/transformers` for local ONNX q8 embeddings
   - `sqlite-vec` for `vec0` cosine search
-  - `@caveman-ai/sdk` only when gateway packing is explicitly configured
 - No ORM, web framework, scheduler, provider SDK collection, or custom frontend.
 - Functional core with thin shells (filesystem / SQLite / process / network). Cohesive modules, plain types, direct composition. No one-implementation factories.
 

@@ -4,7 +4,7 @@ import os from "node:os";
 import { mkdtempSync, rmSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createServer, maybePack } from "../src/mcp";
+import { createServer } from "../src/mcp";
 import { atomicWrite, ensureVault } from "../src/vault";
 
 function tmp(prefix: string) {
@@ -20,7 +20,7 @@ function textResult(result: Awaited<ReturnType<Client["callTool"]>>) {
 }
 
 describe("MCP protocol", () => {
-  test("six tools expose attribution-bearing recall and read", async () => {
+  test("five tools expose attribution-bearing recall and read", async () => {
     const vault = tmp("mcp-protocol-");
     const usage: { recall: any[]; read: any[] } = { recall: [], read: [] };
     let client: Client | undefined;
@@ -50,7 +50,6 @@ describe("MCP protocol", () => {
         "recall",
         "record",
         "remember",
-        "send",
       ]);
       expect(client.getInstructions()).toContain("recall before substantive work");
 
@@ -78,55 +77,5 @@ describe("MCP protocol", () => {
       try { rmSync(vault, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
     }
   }, 15000);
-
-  test("Caveman skips secret-shaped egress and secret-shaped output", async () => {
-    const query = "Bearer fixture-secret-token-123456789";
-    const packet = {
-      id: "pkt-test",
-      mode: "auto" as const,
-      targetCandidates: 10 as const,
-      items: [],
-      next: "read",
-      attribution: {
-        lexCapped: 0,
-        vecCapped: 0,
-        fused: 0,
-        linked: 0,
-        returned: 0,
-        packetBytes: 0,
-        packetTokensEstimate: 0,
-        vector: { available: false, indexed: 0 },
-        filters: { owner: "agent:alice", statuses: ["active"], kinds: null },
-      },
-    };
-    const config = {
-      vault: "/tmp/test",
-      agent: "alice",
-      budgets: {
-        coreTokens: 900,
-        coreCeiling: 1200,
-        packetTokens: 3000,
-        packetCeiling: 3000,
-        l2Bytes: 4096,
-        perArmCap: 60,
-        quotas: { memory: 12, experience: 10, case: 6, skill: 4, inbox: 3 },
-      },
-      caveman: { enabled: true },
-      runner: {},
-    };
-    let calls = 0;
-    const skipped = await maybePack(packet, query, config, async () => {
-      calls++;
-      return { packed: "should not run" };
-    });
-    expect(calls).toBe(0);
-    expect(skipped).toBe(packet);
-
-    const rejected = await maybePack(packet, "safe retrieval cue", config, async () => {
-      calls++;
-      return { packed: "password=fixture-secret-value-123" };
-    });
-    expect(calls).toBe(1);
-    expect(rejected).toBe(packet);
-  });
 });
+

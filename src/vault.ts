@@ -106,7 +106,6 @@ export async function ensureVault(vault: string, agent: string) {
     path.join(aRoot, "skills"),
     path.join(aRoot, "evidence"),
     path.join(aRoot, "jobs"),
-    path.join(aRoot, "messages"),
     path.join(aRoot, "blobs"),
     path.join(aRoot, "audit"),
   ];
