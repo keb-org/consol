@@ -331,7 +331,7 @@ async function validatePacketItemRefs(
         owner: string;
       } | null;
       if (!row) rejections.push({ reason: `packet ref no longer exists: ${item.ref}` });
-      else if (row.doc_id !== decoded.d || row.hash.slice(0, 12) !== decoded.h) rejections.push({ reason: `packet ref is stale or forged: ${item.ref}` });
+      else if (row.doc_id !== decoded.d || !row.hash.startsWith(decoded.h)) rejections.push({ reason: `packet ref is stale or forged: ${item.ref}` });
       else if (row.owner !== decoded.o) rejections.push({ reason: `packet ref owner mismatch: ${item.ref}` });
       else if (!allowedOwners.has(row.owner)) rejections.push({ reason: `packet ref owner not attached: ${item.ref}` });
     } catch {

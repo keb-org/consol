@@ -11,14 +11,12 @@ export type PacketItem = {
   docId: string;
   kind: string;
   summary: string;
-  section: string;
-  scope: string;
-  source_refs: string;
-  status: string;
+  section?: string;
+  scope?: string;
+  source_refs?: string;
+  status?: string;
   owner: string;
   rrf: number;
-  rankLex?: number;
-  rankVec?: number;
   source: "exact" | "fused" | "link";
 };
 
@@ -88,7 +86,7 @@ function normalize(q: string) {
 }
 
 function encodeRef(chunkId: number, docId: string, hash: string, owner: string, packetId: string) {
-  return Buffer.from(JSON.stringify({ c: chunkId, d: docId, h: hash.slice(0, 12), o: owner, p: packetId })).toString("base64url");
+  return Buffer.from(JSON.stringify({ c: chunkId, d: docId, h: hash.slice(0, 8), o: owner, p: packetId })).toString("base64url");
 }
 
 export function decodeRef(ref: string) {
@@ -163,16 +161,14 @@ function toItem(row: Scored, packetId: string): PacketItem {
     docId: row.doc_id,
     kind: row.kind,
     summary: summaryOf(row.text, row.section),
-    section: row.section,
-    scope: row.scope,
-    source_refs: row.source_refs ?? "",
-    status: row.status,
+    ...(row.section ? { section: row.section } : {}),
+    ...(row.scope ? { scope: row.scope } : {}),
+    ...(row.source_refs ? { source_refs: row.source_refs } : {}),
+    ...((row.status && row.status !== "active") ? { status: row.status } : {}),
     owner: row.owner,
-    rrf: row.rrf,
-    rankLex: row.rankLex,
-    rankVec: row.rankVec,
+    rrf: Math.round(row.rrf * 1000) / 1000,
     source: row.source,
-  };
+  } as PacketItem;
 }
 
 function rankRows(
@@ -245,7 +241,7 @@ function dedupByStatement(items: PacketItem[]): PacketItem[] {
 }
 
 function isTransferable(item: PacketItem): boolean {
-  if (item.kind === "skill" && item.status === "active") return true;
+  if (item.kind === "skill" && (item.status ?? "active") === "active") return true;
   const n = parseSourceRefCount(item.source_refs || item.scope);
   const roots = new Set((item.source_refs || item.scope || "").split(/[;,]/).map(v=>v.trim()).filter(Boolean)).size;
   if (n >= 2 || roots >= 2) return true;
@@ -260,13 +256,13 @@ function boostReusable(items: PacketItem[], lexCount: number, perArmCap: number)
       const distinctRoots = (item.source_refs || item.scope) ? parseSourceRefCount(item.source_refs || item.scope) : sourceCount;
       const boost = transferBoost({
         kind: item.kind,
-        status: item.status,
+        status: item.status ?? "active",
         sourceCount,
         distinctRoots,
         lexicalCoverage: lexCount,
         perArmCap,
       });
-      return { ...item, rrf: item.rrf + boost };
+      return { ...item, rrf: Math.round((item.rrf + boost) * 1000) / 1000 };
     })
     .sort((a, b) => b.rrf - a.rrf || a.docId.localeCompare(b.docId));
 }
@@ -376,7 +372,7 @@ function materializePacket(draft: PacketDraft, items: PacketItem[], l1Count: num
   const l1 = items.slice(0, l1Count).map((item) => ({
     ref: item.ref,
     overview: item.summary,
-    section: item.section,
+    section: item.section ?? "",
   }));
   const packet: Packet = {
     ...draft,
@@ -400,7 +396,7 @@ function materializePacket(draft: PacketDraft, items: PacketItem[], l1Count: num
 function fitPacket(draft: PacketDraft, budgets: Budgets): Packet {
   const ceiling = packetCeilingBytes(budgets);
   let items = draft.items.slice();
-  let l1Count = Math.min(5, items.length);
+  let l1Count = 0; // compact: l1 duplicates items[].summary — drop to save ~15%
   while (true) {
     const packet = materializePacket(draft, items, l1Count);
     if (packet.attribution.packetBytes <= ceiling) return packet;
@@ -462,7 +458,7 @@ export function readChunk(db: Database, ref: string, budgets: Budgets, cursor?: 
   if (!row) throw new Error("unknown ref");
   if (row.doc_id !== d) throw new Error("ref document mismatch");
   if (row.owner !== o) throw new Error("ref owner mismatch");
-  if (row.hash.slice(0, 12) !== h) throw new Error("stale ref: content hash changed");
+  if (!row.hash.startsWith(h)) throw new Error("stale ref: content hash changed");
   const offset = cursor ? decodeCursor(cursor, ref) : 0;
   const page = sliceUtf8(row.text, offset, budgets.l2Bytes);
   if (offset > page.totalBytes) throw new Error("cursor past end");

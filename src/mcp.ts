@@ -81,7 +81,7 @@ export async function createServer(
       await (usageHooks.recall
         ? usageHooks.recall(ctx, packet, retrieved)
         : recordRecallUsage(config.vault, ctx.aRoot, ctx.agent, packet, retrieved));
-      const response = JSON.stringify({ ...packet, agent: ctx.agent, syncWarning: ctx.syncWarning }, null, 2);
+      const response = JSON.stringify({ ...packet, agent: ctx.agent, syncWarning: ctx.syncWarning });
       const ceiling = Math.min(config.budgets.packetTokens, config.budgets.packetCeiling) * 4;
       if (Buffer.byteLength(response, "utf8") > ceiling) {
         throw new Error(`MCP recall response exceeds ${ceiling}-byte ceiling`);
@@ -114,7 +114,7 @@ export async function createServer(
       await (usageHooks.read
         ? usageHooks.read(ctx, usage)
         : recordConsultedUsage(config.vault, ctx.aRoot, ctx.agent, usage));
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ...chunk, agent: ctx.agent }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ...chunk, agent: ctx.agent }) }] };
     },
   );
 
@@ -128,7 +128,7 @@ export async function createServer(
     async ({ statement, scope, refs, agent }) => {
       const ctx = await resolveCtx(agent);
       const res = await remember(config.vault, ctx.aRoot, ctx.agent, { statement, scope, refs }, ctx.db);
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ...res, agent: ctx.agent }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ...res, agent: ctx.agent }) }] };
     },
   );
 
@@ -141,7 +141,7 @@ export async function createServer(
     async ({ kind, data, refs, agent }) => {
       const ctx = await resolveCtx(agent);
       const rec = await record(config.vault, ctx.aRoot, ctx.agent, { kind, data: data as Record<string, unknown>, refs });
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ...rec, agent: ctx.agent }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ...rec, agent: ctx.agent }) }] };
     },
   );
 
@@ -156,10 +156,10 @@ export async function createServer(
       const ctx = await resolveCtx(agent);
       if (!confirmation) {
         const plan = await forgetPlan(config.vault, ctx.aRoot, target);
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ...plan, agent: ctx.agent }, null, 2) }] };
+        return { content: [{ type: "text" as const, text: JSON.stringify({ ...plan, agent: ctx.agent }) }] };
       }
       const res = await forgetConfirm(config.vault, ctx.aRoot, ctx.agent, target, confirmation, ctx.db);
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ...res, agent: ctx.agent }, null, 2) }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify({ ...res, agent: ctx.agent }) }] };
     },
   );
 
