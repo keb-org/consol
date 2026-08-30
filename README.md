@@ -47,7 +47,9 @@ Read https://raw.githubusercontent.com/keb-org/consol/main/SETUP.md and set up c
 - Agents: <default: jarvis>
 ```
 
-Your agent will automatically install the package, initialize your local vault, configure multi-agent routing, wire the MCP server, and ask follow-up questions to customize additional agent specialists or automated reflection. Zero manual configuration.
+Your agent will automatically install the package, initialize your local vault, configure multi-agent routing, and wire the MCP server — the server itself injects the mandatory human-like memory protocol (recall → read if confident, search if not) into every connected agent and subagent. No extra host file required.
+
+Host rule is optional hardening: mirroring SETUP.md §5 into CLAUDE.md/AGENTS.md adds per-turn re-injection, but install is one step.
 
 ---
 

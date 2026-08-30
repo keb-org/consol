@@ -53,7 +53,7 @@ export async function createServer(
   const server = new McpServer(
     { name: "consol", version: pkg.version },
     {
-      instructions: "Use recall before substantive work, then semantically rerank its compact descriptors for the current goal and read every plausibly needed ref. Recall again with narrower cues when the task branches, assumptions fail, evidence conflicts, context is missing, or before a high-impact decision. Record outcomes after work. MCP guidance cannot force host tool use.",
+      instructions: "MANDATORY MEMORY PROTOCOL — Every agent and every spawned subagent MUST use Consol as human-like, continuously-injected memory. One recall at the start is NOT enough — memory must be injected throughout reasoning. Single-recall-then-never-again violates protocol.\n\nHuman loop (repeat until task done):\n1. BEFORE work: call recall on the matched agent bank and rerank descriptors for the current goal.\n2. Strong match → read every plausible ref and apply it.\n3. No/weak/uncertain match → search online/docs (web search, Context7 for library docs, codebase search), then proceed. Do not hallucinate when Consol has no answer.\n4. MID-REASONING — after every tool result, before every edit/decision/subagent spawn, ask 'do I need memory for this next step?' If yes, recall again with a narrower query derived from new context. Mandatory triggers: task branches, new error/observation, assumption failed, evidence conflicts, context missing, or before any high-impact code change/decision. Recall is bounded and cheap (<1k tokens) — no token-saving excuse.\n5. AFTER work: MUST call record with observable outcome, evaluator, and appliedRefs (repeat those refs in top-level refs). Retrieval/read alone never means application or success.\n6. Parent agents MUST propagate this protocol to every subagent they spawn.",
     },
   );
 
@@ -62,7 +62,7 @@ export async function createServer(
   server.registerTool(
     "recall",
     {
-      description: "Retrieve bounded compact candidates. Host must semantically rerank descriptors for current goal, read every plausible ref, and recall again with narrower cues after branches, contradictions, failed assumptions, missing context, or before high-impact decisions.",
+      description: "MANDATORY — call repeatedly, not just once. Retrieve bounded compact candidates (<1k tokens). Protocol: (a) call before ANY substantive work, (b) call AGAIN mid-reasoning after every tool result / before every edit/decision/subagent spawn when the next step could benefit from memory — mandatory triggers: task branches, new error/observation, assumption failed, evidence conflicts, context missing, before high-impact change. Then rerank descriptors; if no strong match or low confidence, search online/docs (web search, Context7, codebase search) instead of hallucinating. One recall at start then never again violates protocol.",
       inputSchema: { query: z.string().min(1), mode: z.enum(["auto", "facts", "guidance", "history"]).optional(), agent: agentParam },
       annotations: { readOnlyHint: true, idempotentHint: true },
     },
@@ -93,7 +93,7 @@ export async function createServer(
   server.registerTool(
     "read",
     {
-      description: "Read one UTF-8 byte-bounded page from a recall ref; pass returned cursor for next page. Pass agent when reading team-owned refs.",
+      description: "MANDATORY after each recall that returns candidates — including mid-reasoning recalls. Read one UTF-8 byte-bounded page from a recall ref; pass cursor for next page. Pass agent when reading team-owned refs. Every plausible candidate MUST be read before the next decision. If recall returned nothing useful, search online/docs instead — do not skip.",
       inputSchema: { ref: z.string().min(1), cursor: z.string().optional(), agent: agentParam },
       annotations: { readOnlyHint: true, idempotentHint: true },
     },
@@ -135,7 +135,7 @@ export async function createServer(
   server.registerTool(
     "record",
     {
-      description: "Append evidence for later reflection. For outcome, pass outcome=success|failure|partial|unknown, evaluator=pass|fail|mixed|unknown, and optional appliedRefs also listed in refs. Retrieval/read are tracked separately and never imply application or success.",
+      description: "MANDATORY — call after every substantive step AND at task end (not just at end). Append evidence for later reflection. For outcome, pass outcome=success|failure|partial|unknown, evaluator=pass|fail|mixed|unknown, and optional appliedRefs also listed in refs. Retrieval/read/recall alone never means application or success. Mid-reasoning record keeps the vault current for the next recall.",
       inputSchema: { kind: z.enum(["observation", "action", "feedback", "result", "outcome", "case", "correction"]), data: z.record(z.unknown()), refs: z.array(z.string()).optional(), agent: agentParam },
     },
     async ({ kind, data, refs, agent }) => {

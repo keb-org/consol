@@ -51,7 +51,8 @@ describe("MCP protocol", () => {
         "record",
         "remember",
       ]);
-      expect(client.getInstructions()).toContain("recall before substantive work");
+      expect(client.getInstructions()).toContain("MANDATORY MEMORY PROTOCOL");
+      expect(client.getInstructions()).toContain("recall");
 
       const recalled = textResult(await client.callTool({
         name: "recall",

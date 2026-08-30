@@ -1,6 +1,6 @@
 {
   "name": "@kryat/consol",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Local, inspectable memory and experience evidence for MCP agents",
   "type": "module",
   "main": "./src/index.ts",

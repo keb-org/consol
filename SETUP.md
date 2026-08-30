@@ -2,6 +2,8 @@
 
 Install one `@kryat/consol@latest` MCP server. Server can route multiple private banks through optional `agent` argument; do not create one server per bank.
 
+No extra host-rule file is required — the MCP server itself injects the mandatory memory protocol (recall → read if confident, search if not) into every connected agent and subagent via built-in instructions and tool descriptions. Installing the server is the install.
+
 ## 1. Choose vault and default bank
 
 Ask user only when values are unknown:
@@ -81,13 +83,22 @@ Recall from matched bank before substantive work.
 
 Agent IDs reject traversal. One process keeps separate SQLite indexes and canonical roots per bank.
 
-## 5. Host operating rule
+## 5. Memory protocol (built into the MCP server — no host file required)
 
-Install concise host rule where host supports project/global instructions:
+The MCP server injects this protocol into every connected agent and subagent via `instructions` and tool `description`. It is active as soon as the server is configured — no `CLAUDE.md`/`AGENTS.md`/`.cursorrules` edit needed. Treat the block below as reference; the live protocol is the server's `instructions` response.
 
 ```text
-Persistent memory uses Consol MCP. Before substantive work, call recall on matched agent bank, semantically rerank compact descriptors, and read every plausible ref. Recall again with narrower cues when task branches, assumptions fail, evidence conflicts, context is missing, or before high-impact decisions. After work, call record with observable outcome and evaluator. Put only guidance actually applied in data.appliedRefs and repeat those refs in refs. Retrieval or read alone never means application or success.
+MANDATORY MEMORY PROTOCOL — Every agent and every spawned subagent MUST use Consol as human-like, continuously-injected memory. One recall at start is NOT enough.
+
+1. Before ANY substantive work, call recall on the matched agent bank and rerank descriptors.
+2. Strong, relevant match → read every plausible ref and apply it.
+3. No/weak/uncertain match → search online/docs (web search, Context7 for library docs, codebase search), then proceed. Do not hallucinate when Consol has no answer.
+4. MID-REASONING — after every tool result, before every edit/decision/subagent spawn, ask "do I need memory for this next step?" If yes, recall again with a narrower query derived from new context. Mandatory triggers: task branches, new error/observation, assumption failed, evidence conflicts, context missing, or before any high-impact change. Recall is bounded and cheap (<1k tokens) — no token-saving excuse.
+5. After every substantive step AND at task end, MUST call record with observable outcome, evaluator, and appliedRefs (repeat those refs in top-level refs). Mid-reasoning record keeps the vault current for the next recall. Retrieval/read alone never means application or success.
+6. Parent agents MUST propagate this protocol to every subagent they spawn.
 ```
+
+Optional hardening: if the host supports persistent instructions, mirroring this block in `CLAUDE.md`/`AGENTS.md`/`.cursorrules` adds per-turn and per-subagent re-injection, but it is not required for the protocol to be active.
 
 Tool semantics:
 
@@ -147,9 +158,18 @@ Rollback writes another revision. Rolling back a creation removes candidate note
 
 `forget` plans first, then confirms only after user approval. Confirmation scrubs matching private text derivatives (evidence, usage, jobs, revisions, snapshots, and messages). It deletes an explicitly referenced, hash-named blob only if no surviving parsed JSON/JSONL record references that hash; it never rewrites binary bytes. `audit/erasures.jsonl` keeps a content-free receipt with hashes/counts, never erased target.
 
-## 8. Post-Install Follow-Up & Customization
+## 8. Post-Install Verification
 
-After setup completes successfully, print the exact configured vault path and present these follow-up options:
+After setup completes, the installer MUST confirm the built-in memory protocol is active:
+
+1. Print the exact vault path: `<absolute-vault-path>`.
+2. Run `doctor` and confirm MCP reports `instructions` containing `MANDATORY MEMORY PROTOCOL`. If missing, re-check `mcpServers` config and reload host connections. Common fix: `command` should be `bunx` (or `npx -y`), `args` must include `@kryat/consol@latest serve`, and `env.VAULT`/`env.AGENT` must be absolute.
+3. If either check fails, fail setup with explicit guidance — do not silently complete without memory enforcement.
+4. Optional hardening: mirror the protocol from §5 into `CLAUDE.md`/`AGENTS.md`/`.cursorrules` for extra per-turn/subagent re-injection. Not required — the MCP server already injects it — but recommended where the host supports it.
+
+## 9. Post-Install Follow-Up & Customization
+
+After verification above completes successfully, present these follow-up options:
 
 1. **Obsidian Visual Graph**:
    - Install Obsidian: https://obsidian.md/download
