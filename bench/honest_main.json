@@ -1,0 +1,154 @@
+{
+  "r10": {
+    "dataset": "10M",
+    "overall": 21.5,
+    "avgTok": 1190,
+    "p50": 17.81,
+    "totalQ": 200,
+    "breakdown": {
+      "abstention": {
+        "acc": 15,
+        "total": 20,
+        "avgTok": 1210,
+        "p50": 23.97
+      },
+      "contradiction_resolution": {
+        "acc": 6.3,
+        "total": 20,
+        "avgTok": 1142,
+        "p50": 18.44
+      },
+      "event_ordering": {
+        "acc": 17.6,
+        "total": 20,
+        "avgTok": 1204,
+        "p50": 16.67
+      },
+      "information_extraction": {
+        "acc": 50,
+        "total": 20,
+        "avgTok": 1181,
+        "p50": 15.31
+      },
+      "instruction_following": {
+        "acc": 15,
+        "total": 20,
+        "avgTok": 1159,
+        "p50": 15.24
+      },
+      "knowledge_update": {
+        "acc": 50,
+        "total": 20,
+        "avgTok": 1182,
+        "p50": 18.9
+      },
+      "multi_session_reasoning": {
+        "acc": 35.5,
+        "total": 20,
+        "avgTok": 1204,
+        "p50": 20.97
+      },
+      "preference_following": {
+        "acc": 7.9,
+        "total": 20,
+        "avgTok": 1204,
+        "p50": 19.36
+      },
+      "summarization": {
+        "acc": 5,
+        "total": 20,
+        "avgTok": 1211,
+        "p50": 18.87
+      },
+      "temporal_reasoning": {
+        "acc": 12.5,
+        "total": 20,
+        "avgTok": 1204,
+        "p50": 17.75
+      }
+    }
+  },
+  "r1": {
+    "dataset": "1M",
+    "overall": 28.1,
+    "avgTok": 1534,
+    "p50": 14.47,
+    "totalQ": 700,
+    "breakdown": {
+      "abstention": {
+        "acc": 22.5,
+        "total": 70,
+        "avgTok": 1553,
+        "p50": 13.61
+      },
+      "contradiction_resolution": {
+        "acc": 15.9,
+        "total": 70,
+        "avgTok": 1466,
+        "p50": 14.31
+      },
+      "event_ordering": {
+        "acc": 33.3,
+        "total": 70,
+        "avgTok": 1566,
+        "p50": 14.66
+      },
+      "information_extraction": {
+        "acc": 52.8,
+        "total": 70,
+        "avgTok": 1529,
+        "p50": 13.47
+      },
+      "instruction_following": {
+        "acc": 12.9,
+        "total": 70,
+        "avgTok": 1460,
+        "p50": 14.87
+      },
+      "knowledge_update": {
+        "acc": 53.6,
+        "total": 70,
+        "avgTok": 1497,
+        "p50": 13.68
+      },
+      "multi_session_reasoning": {
+        "acc": 33.6,
+        "total": 70,
+        "avgTok": 1566,
+        "p50": 15.05
+      },
+      "preference_following": {
+        "acc": 12.8,
+        "total": 70,
+        "avgTok": 1566,
+        "p50": 15.95
+      },
+      "summarization": {
+        "acc": 17.2,
+        "total": 70,
+        "avgTok": 1566,
+        "p50": 15.39
+      },
+      "temporal_reasoning": {
+        "acc": 26.4,
+        "total": 70,
+        "avgTok": 1566,
+        "p50": 16.36
+      }
+    }
+  },
+  "budgets": {
+    "coreTokens": 900,
+    "coreCeiling": 1200,
+    "packetTokens": 3000,
+    "packetCeiling": 3000,
+    "l2Bytes": 4096,
+    "perArmCap": 60,
+    "quotas": {
+      "memory": 12,
+      "experience": 10,
+      "case": 6,
+      "skill": 4
+    }
+  }
+}

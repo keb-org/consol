@@ -8,6 +8,16 @@ vault/
 .vault/
 *-vault/
 .cache/
+bench/beam_harness/out/
+bench/beam_harness/.cache/
 *.tmp*
 .lock
+
+# Local research and scratch data
+.research/
+*.jsonl
+src/graph.ts
+src/tokenizer.ts
+
+
 

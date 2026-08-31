@@ -34,6 +34,99 @@ describe("stability: vault and index invariants", () => {
     db.close(); cleanup(vault);
   }, 15000);
 
+  test("numeric ledger preserves and retrieves source state across lifecycle", async () => {
+    const { ensureVault, atomicWrite } = await import("../src/vault");
+    const { extractNumericEvidence, numericLedgerSearch, openIndex, rebuild, setEmbedderForTests, syncVault } = await import("../src/index");
+    const { Budgets } = await import("../src/config");
+    const { readChunk, recall } = await import("../src/retrieval");
+    const { unlink } = await import("node:fs/promises");
+    const vault = tmp("stability-numeric-ledger-");
+    await ensureVault(vault, "alice");
+    const aRoot = path.join(vault, "agents", "alice");
+    const older = path.join(aRoot, "memories", "redis-old.md");
+    const newer = path.join(aRoot, "memories", "redis-new.md");
+    const note = (id: string, body: string) => `---\nid: ${id}\nkind: memory\nstatus: active\n---\n${body}\n`;
+    setEmbedderForTests(async (texts: string[]) => ({
+      tolist: () => texts.map(() => Array(384).fill(0.01)),
+    }), vault);
+    await atomicWrite(older, note("redis-old", "[Date: March-01-2024] USER: Redis TTL was set to 15-minute. React 18.2 was deployed. Deadline was March 15, 2024. Ticket APP-1234 tracked it."));
+    await atomicWrite(newer, note("redis-new", "[Date: March-03-2024] USER: Redis TTL was updated to 20-minute."));
+    const db = openIndex(aRoot);
+    const projected = () => db.query(`
+      SELECT c.doc_id, n.value, n.value_kind, n.statement, n.occurred_at, n.position
+      FROM numeric_ledger n JOIN chunks c ON c.chunk_id=n.chunk_id
+      ORDER BY c.doc_id, n.position, n.value
+    `).all() as any[];
+    try {
+      await syncVault(db, vault, aRoot, "alice");
+      const rows = projected();
+      expect(rows.find((row) => row.value === "15-minute")).toMatchObject({ value_kind: "measure", occurred_at: "2024-03-01" });
+      expect(rows.find((row) => row.value === "20-minute")).toMatchObject({ value_kind: "measure", occurred_at: "2024-03-03" });
+      expect(rows.find((row) => row.value === "March 15, 2024")?.value_kind).toBe("date");
+      expect(rows.find((row) => row.value === "18.2")?.value_kind).toBe("version");
+      expect(rows.some((row) => row.value === "March-01-2024" || row.value === "March-03-2024")).toBe(false);
+      expect(rows.some((row) => row.value === "1234")).toBe(false);
+      expect(extractNumericEvidence("TTL changed from 15-minute to 20-minute.").map((row) => row.value)).toEqual(["15-minute", "20-minute"]);
+
+      const direct = numericLedgerSearch(db, "What is the current Redis TTL duration?", 20);
+      expect(direct.length).toBeGreaterThan(0);
+      expect(direct[0].value).toBe("20-minute");
+      const budgets = Budgets.parse({ perArmCap: 20 });
+      const packet = await recall(db, vault, "What is the current Redis TTL duration?", budgets, "agent:alice");
+      expect(packet.attribution.ledgerCapped).toBeGreaterThan(0);
+      const maximumPacket = await recall(db, vault, "What is the maximum Redis TTL?", budgets, "agent:alice");
+      expect(maximumPacket.attribution.ledgerCapped).toBeGreaterThan(0);
+      const ledgerItems = packet.items.filter((item) => item.source === "ledger");
+      expect(ledgerItems.map((item) => item.docId)).toEqual(["redis-new", "redis-old"]);
+      expect(readChunk(db, ledgerItems[0].ref, budgets).text).toContain("20-minute");
+      expect(readChunk(db, ledgerItems[1].ref, budgets).text).toContain("15-minute");
+
+      const withoutLedger = await recall(db, vault, "What is the current Redis TTL duration?", budgets, "agent:alice", "auto", new Set(), { numericLedger: false });
+      expect(withoutLedger.attribution.ledgerCapped).toBe(0);
+      expect(withoutLedger.items.some((item) => item.source === "ledger")).toBe(false);
+
+      await atomicWrite(newer, note("redis-new", "[Date: March-04-2024] USER: Redis TTL was updated to 25-minute."));
+      await syncVault(db, vault, aRoot, "alice");
+      expect((db.query("SELECT count(*) AS n FROM numeric_ledger WHERE value='20-minute'").get() as any).n).toBe(0);
+      expect((db.query("SELECT count(*) AS n FROM numeric_ledger WHERE value='25-minute'").get() as any).n).toBe(1);
+
+      await unlink(older);
+      await syncVault(db, vault, aRoot, "alice");
+      expect((db.query("SELECT count(*) AS n FROM numeric_ledger WHERE value='15-minute'").get() as any).n).toBe(0);
+      expect((db.query("SELECT count(*) AS n FROM numeric_ledger_fts WHERE numeric_ledger_fts MATCH ?").get('"15-minute"') as any).n).toBe(0);
+      const beforeRebuild = projected();
+      await rebuild(db, vault, aRoot, "alice");
+      expect(projected()).toEqual(beforeRebuild);
+    } finally {
+      db.close();
+      cleanup(vault);
+    }
+  }, 20000);
+
+  test("fingerprint reset clears temporal projection", async () => {
+    const { ensureVault } = await import("../src/vault");
+    const { openIndex } = await import("../src/index");
+    const { indexFingerprint } = await import("../src/config");
+    const vault = tmp("stability-fingerprint-");
+    await ensureVault(vault, "alice");
+    const aRoot = path.join(vault, "agents", "alice");
+    let db: any;
+    try {
+      db = openIndex(aRoot);
+      db.query("INSERT INTO temporal(doc_id, valid_from, valid_to) VALUES(?,?,?)").run("stale", "2025-01-01", null);
+      db.query("UPDATE meta SET value='stale-fingerprint' WHERE key='fingerprint'").run();
+      db.close();
+      db = undefined;
+
+      db = openIndex(aRoot);
+      expect((db.query("SELECT count(*) AS n FROM temporal").get() as any).n).toBe(0);
+      expect((db.query("SELECT value FROM meta WHERE key='fingerprint'").get() as any).value).toBe(indexFingerprint());
+    } finally {
+      db?.close();
+      cleanup(vault);
+    }
+  });
+
   test("crash around atomic commit: index tracks committed hash", async () => {
     const { ensureVault, atomicWrite, hashContent } = await import("../src/vault");
     const { openIndex, syncVault } = await import("../src/index");
@@ -148,6 +241,112 @@ describe("stability: vault and index invariants", () => {
       db.close(); cleanup(vault);
     }
   }, 15000);
+
+  test("serializes embedder calls and recovers after rejection", async () => {
+    const { embedTexts, setEmbedderForTests } = await import("../src/index");
+    let active = 0;
+    let maxActive = 0;
+    let calls = 0;
+    let rejectFirst!: (error: Error) => void;
+    const firstGate = new Promise<never>((_, reject) => { rejectFirst = reject; });
+    setEmbedderForTests(async (texts: string[]) => {
+      calls++;
+      active++;
+      maxActive = Math.max(maxActive, active);
+      try {
+        if (calls === 1) return await firstGate;
+        return { tolist: () => texts.map(() => Array(384).fill(0.01)) };
+      } finally {
+        active--;
+      }
+    }, "unused");
+
+    const first = embedTexts("unused", ["first"]);
+    await Promise.resolve();
+    const second = embedTexts("unused", ["second"]);
+    await Promise.resolve();
+    expect(calls).toBe(1);
+    rejectFirst(new Error("first failed"));
+    await expect(first).rejects.toThrow("embed unavailable: first failed");
+    expect(await second).toHaveLength(1);
+    expect(calls).toBe(2);
+    expect(maxActive).toBe(1);
+  });
+
+  test("BEAM cache hits and invalidates stale or changed sources", async () => {
+    const { makeConsolAdapter } = await import("../bench/beam_harness/adapters/consol");
+    const { setEmbedderForTests } = await import("../src/index");
+    const { readFileSync, writeFileSync } = await import("node:fs");
+    const vault = tmp("beam-cache-");
+    const adapter = makeConsolAdapter("cache-test");
+    const ctx = { vaultRoot: vault, tmpDir: "", dataset: "1M" as const, chatId: "99" };
+    const chat = (answer: string) => [{
+      time_anchor: "2026-01-01",
+      turns: [[
+        { role: "user", content: "What is the cache marker?" },
+        { role: "assistant", content: answer },
+      ]],
+    }];
+    setEmbedderForTests(async (texts: string[]) => ({
+      tolist: () => texts.map(() => Array(384).fill(0.01)),
+    }), vault);
+
+    let opened: { agentRoot: string; db: any } | undefined;
+    try {
+      opened = await adapter.ingestChat(chat("cachemarkervalue-one"), { ...ctx, sourceHash: "source-one" });
+      expect(opened.db.__cacheHit).toBe(false);
+      expect(existsSync(path.join(opened.agentRoot, "beam-cache.json"))).toBe(true);
+      await adapter.close?.({ ...opened, vaultRoot: vault });
+
+      opened = await adapter.ingestChat(chat("cachemarkervalue-one"), { ...ctx, sourceHash: "source-one" });
+      expect(opened.db.__cacheHit).toBe(true);
+      const packet = await adapter.recall("cachemarkervalue-one", { ...opened, vaultRoot: vault });
+      expect(packet.items.length).toBeGreaterThan(0);
+      const stale = path.join(opened.agentRoot, "memories", "n99999.md");
+      await adapter.close?.({ ...opened, vaultRoot: vault });
+      writeFileSync(stale, "---\nid: stale\nkind: memory\n---\nstale-cache-note\n");
+
+      opened = await adapter.ingestChat(chat("cachemarkervalue-one"), { ...ctx, sourceHash: "source-one" });
+      expect(opened.db.__cacheHit).toBe(false);
+      expect(existsSync(stale)).toBe(false);
+      await adapter.close?.({ ...opened, vaultRoot: vault });
+
+      opened = await adapter.ingestChat(chat("cachemarkervalue-two"), { ...ctx, sourceHash: "source-two" });
+      expect(opened.db.__cacheHit).toBe(false);
+      const text = (opened.db.query("SELECT group_concat(text, ' ') AS text FROM chunks").get() as any).text;
+      expect(text).toContain("cachemarkervalue-two");
+      expect(text).not.toContain("cachemarkervalue-one");
+      const manifestPath = path.join(opened.agentRoot, "beam-cache.json");
+      const tamper = (key: "adapterSourceHash" | "indexFingerprint") => {
+        const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+        manifest[key] = `stale-${key}`;
+        writeFileSync(manifestPath, JSON.stringify(manifest));
+      };
+      const seedTemporal = () => {
+        opened!.db.query("INSERT INTO temporal(doc_id, valid_from, valid_to) VALUES(?,?,?)").run("stale", "2025-01-01", null);
+      };
+
+      seedTemporal();
+      tamper("adapterSourceHash");
+      await adapter.close?.({ ...opened, vaultRoot: vault });
+      opened = await adapter.ingestChat(chat("cachemarkervalue-two"), { ...ctx, sourceHash: "source-two" });
+      expect(opened.db.__cacheHit).toBe(false);
+      expect((opened.db.query("SELECT count(*) AS n FROM temporal").get() as any).n).toBe(0);
+
+      seedTemporal();
+      tamper("indexFingerprint");
+      await adapter.close?.({ ...opened, vaultRoot: vault });
+      opened = await adapter.ingestChat(chat("cachemarkervalue-two"), { ...ctx, sourceHash: "source-two" });
+      expect(opened.db.__cacheHit).toBe(false);
+      expect((opened.db.query("SELECT count(*) AS n FROM temporal").get() as any).n).toBe(0);
+      await adapter.close?.({ ...opened, vaultRoot: vault });
+      opened = undefined;
+      expect(existsSync(vault)).toBe(true);
+    } finally {
+      if (opened) await adapter.close?.({ ...opened, vaultRoot: vault });
+      cleanup(vault);
+    }
+  }, 15000);
 });
 
 describe("stability: retrieval under real budgets", () => {
@@ -221,20 +420,25 @@ describe("stability: retrieval under real budgets", () => {
     const aRoot = path.join(vault, "agents", "alice");
     const body = "🙂漢字abc".repeat(80);
     await atomicWrite(path.join(aRoot, "memories", "mem-cursor.md"), `---\nid: mem-cursor\nkind: memory\n---\n${body}\n`);
+    await atomicWrite(path.join(aRoot, "memories", "mem-cursor-other.md"), "---\nid: mem-cursor-other\nkind: memory\n---\nother cursor target\n");
     const db = openIndex(aRoot);
     await syncVault(db, vault, aRoot, "alice");
     const budgets = Budgets.parse({ l2Bytes: 17 });
     const ref = (await recall(db, vault, "mem-cursor", budgets)).items[0].ref;
     let cursor: string | undefined;
+    let firstCursor: string | undefined;
     let combined = "";
     do {
       const page = readChunk(db, ref, budgets, cursor);
       expect(page.bytes).toBeLessThanOrEqual(17);
       expect(page.text).not.toContain("�");
       combined += page.text;
+      firstCursor ??= page.cursor;
       cursor = page.cursor;
     } while (cursor);
     expect(combined).toBe(body);
+    const otherRef = (await recall(db, vault, "mem-cursor-other", budgets)).items[0].ref;
+    expect(() => readChunk(db, otherRef, budgets, firstCursor)).toThrow("invalid cursor");
     db.close(); cleanup(vault);
   }, 15000);
 
