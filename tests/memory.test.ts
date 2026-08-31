@@ -1,5 +1,5 @@
 import { afterEach, describe, test, expect } from "bun:test";
-import { validateProposal } from "../src/reflection";
+import { validateProposal } from "@/reflection";
 
 const TEST_SECRET_ENV = "CONSOL_TEST_API_KEY";
 
@@ -9,7 +9,7 @@ afterEach(() => {
 
 describe("memory lifecycle", () => {
   test("rejects secrets in every remember field", async () => {
-    const { remember } = await import("../src/memory");
+    const { remember } = await import("@/memory");
     const vault = "/tmp/vault-test";
     const agentRoot = "/tmp/vault-test/agents/a";
     await expect(remember(vault, agentRoot, "a", { statement: "key sk-123456789012345678901234567890" })).rejects.toThrow("secret rejected");
@@ -19,7 +19,7 @@ describe("memory lifecycle", () => {
   test("configured secret values are rejected and redacted without enumerating environment", async () => {
     const configured = "fixture-configured-secret-123456789";
     process.env[TEST_SECRET_ENV] = configured;
-    const { containsSecret, redactSecrets, secretInText } = await import("../src/security");
+    const { containsSecret, redactSecrets, secretInText } = await import("@/security");
     expect(secretInText(`prefix ${configured} suffix`)).toBe(true);
     expect(containsSecret({ note: configured })).toBe(true);
     const redacted = redactSecrets(`failed with ${configured}`);
@@ -39,8 +39,8 @@ describe("memory lifecycle", () => {
     expect(r.ok).toBe(false);
   });
   test("remember deduplicates exact normalized assertions", async () => {
-    const { ensureVault } = await import("../src/vault");
-    const { remember } = await import("../src/memory");
+    const { ensureVault } = await import("@/vault");
+    const { remember } = await import("@/memory");
     const { mkdtempSync, rmSync } = await import("node:fs");
     const path = await import("node:path");
     const os = await import("node:os");
@@ -56,8 +56,8 @@ describe("memory lifecycle", () => {
     }
   });
   test("record rejects unsupported kinds and secret-shaped data", async () => {
-    const { ensureVault } = await import("../src/vault");
-    const { record } = await import("../src/memory");
+    const { ensureVault } = await import("@/vault");
+    const { record } = await import("@/memory");
     const { mkdtempSync, rmSync } = await import("node:fs");
     const path = await import("node:path");
     const os = await import("node:os");

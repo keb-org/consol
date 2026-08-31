@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { hashContent } from "../vault";
+import { hashContent } from "@/storage/vault";
 import { embedTexts } from "./embedding";
 import { surfaceFtsAvailable, surfaceTableAvailable, surfaceVectorAvailable } from "./schema";
 

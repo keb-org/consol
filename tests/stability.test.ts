@@ -8,7 +8,7 @@ function cleanup(dir: string) { try { rmSync(dir, { recursive: true, force: true
 
 describe("stability: vault and index invariants", () => {
   test("chunker overlaps without dropping long-note tails", async () => {
-    const { chunkMarkdown } = await import("../src/vault");
+    const { chunkMarkdown } = await import("@/vault");
     const body = "0123456789".repeat(1000) + "TAIL_SENTINEL";
     const chunks = chunkMarkdown(`---\nid: long\nkind: memory\n---\n${body}`, 100, 10);
     expect(chunks.length).toBeGreaterThan(32);
@@ -16,8 +16,8 @@ describe("stability: vault and index invariants", () => {
     expect(chunks[0].text.slice(-10)).toBe(chunks[1].text.slice(0, 10));
   });
   test("reindex is deterministic", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault, rebuild } = await import("../src/index");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault, rebuild } = await import("@/index");
     const vault = tmp("stability-reindex-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -35,10 +35,10 @@ describe("stability: vault and index invariants", () => {
   }, 15000);
 
   test("numeric ledger preserves and retrieves source state across lifecycle", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { extractNumericEvidence, numericLedgerSearch, openIndex, rebuild, setEmbedderForTests, syncVault } = await import("../src/index");
-    const { Budgets } = await import("../src/config");
-    const { readChunk, recall } = await import("../src/retrieval");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { extractNumericEvidence, numericLedgerSearch, openIndex, rebuild, setEmbedderForTests, syncVault } = await import("@/index");
+    const { Budgets } = await import("@/config");
+    const { readChunk, recall } = await import("@/retrieval");
     const { unlink } = await import("node:fs/promises");
     const vault = tmp("stability-numeric-ledger-");
     await ensureVault(vault, "alice");
@@ -104,9 +104,9 @@ describe("stability: vault and index invariants", () => {
   }, 20000);
 
   test("fingerprint reset clears temporal projection", async () => {
-    const { ensureVault } = await import("../src/vault");
-    const { openIndex } = await import("../src/index");
-    const { indexFingerprint } = await import("../src/config");
+    const { ensureVault } = await import("@/vault");
+    const { openIndex } = await import("@/index");
+    const { indexFingerprint } = await import("@/config");
     const vault = tmp("stability-fingerprint-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -128,8 +128,8 @@ describe("stability: vault and index invariants", () => {
   });
 
   test("crash around atomic commit: index tracks committed hash", async () => {
-    const { ensureVault, atomicWrite, hashContent } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
+    const { ensureVault, atomicWrite, hashContent } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
     const { readFile } = await import("node:fs/promises");
     const vault = tmp("stability-atomic-");
     await ensureVault(vault, "alice");
@@ -151,7 +151,7 @@ describe("stability: vault and index invariants", () => {
   }, 15000);
 
   test("stale lock recovery: 30s stale cleared, active blocks", async () => {
-    const { ensureVault, withVaultLock, atomicWrite } = await import("../src/vault");
+    const { ensureVault, withVaultLock, atomicWrite } = await import("@/vault");
     const vault = tmp("stability-lock-");
     await ensureVault(vault, "alice");
     await atomicWrite(path.join(vault, ".lock"), `${Date.now() - 40000}\n99999`);
@@ -164,8 +164,8 @@ describe("stability: vault and index invariants", () => {
   }, 15000);
 
   test("malformed external edit does not corrupt index", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
     const vault = tmp("stability-malformed-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -178,8 +178,8 @@ describe("stability: vault and index invariants", () => {
   }, 15000);
 
   test("external delete reconciles chunks/fts/vectors/files/links", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
     const vault = tmp("stability-delete-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -198,8 +198,8 @@ describe("stability: vault and index invariants", () => {
   }, 15000);
 
   test("embedding failure stays lexical-only without zero vectors", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault, setEmbedderForTests, vectorStatus } = await import("../src/index");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault, setEmbedderForTests, vectorStatus } = await import("@/index");
     const vault = tmp("stability-vector-degraded-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -218,8 +218,8 @@ describe("stability: vault and index invariants", () => {
   }, 15000);
 
   test("unchanged chunks missing vectors are retried", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault, setEmbedderForTests, vectorStatus } = await import("../src/index");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault, setEmbedderForTests, vectorStatus } = await import("@/index");
     const vault = tmp("stability-vector-retry-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -243,7 +243,7 @@ describe("stability: vault and index invariants", () => {
   }, 15000);
 
   test("serializes embedder calls and recovers after rejection", async () => {
-    const { embedTexts, setEmbedderForTests } = await import("../src/index");
+    const { embedTexts, setEmbedderForTests } = await import("@/index");
     let active = 0;
     let maxActive = 0;
     let calls = 0;
@@ -274,8 +274,8 @@ describe("stability: vault and index invariants", () => {
   });
 
   test("BEAM cache hits and invalidates stale or changed sources", async () => {
-    const { makeConsolAdapter } = await import("../bench/beam_harness/adapters/consol");
-    const { setEmbedderForTests } = await import("../src/index");
+    const { makeConsolAdapter } = await import("@lab/bench/beam_harness/adapters/consol");
+    const { setEmbedderForTests } = await import("@/index");
     const { readFileSync, writeFileSync } = await import("node:fs");
     const vault = tmp("beam-cache-");
     const adapter = makeConsolAdapter("cache-test");
@@ -351,10 +351,10 @@ describe("stability: vault and index invariants", () => {
 
 describe("stability: retrieval under real budgets", () => {
   test("exact ID navigation wins", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { recall } = await import("../src/retrieval");
-    const { Budgets } = await import("../src/config");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
+    const { recall } = await import("@/retrieval");
+    const { Budgets } = await import("@/config");
     const vault = tmp("stability-exact-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -369,10 +369,10 @@ describe("stability: retrieval under real budgets", () => {
   }, 15000);
 
   test("typed quotas prevent starvation", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { recall } = await import("../src/retrieval");
-    const { Budgets } = await import("../src/config");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
+    const { recall } = await import("@/retrieval");
+    const { Budgets } = await import("@/config");
     const vault = tmp("stability-quota-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -392,10 +392,10 @@ describe("stability: retrieval under real budgets", () => {
   }, 15000);
 
   test("L2 byte ceiling holds on readChunk", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { recall, readChunk } = await import("../src/retrieval");
-    const { Budgets } = await import("../src/config");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
+    const { recall, readChunk } = await import("@/retrieval");
+    const { Budgets } = await import("@/config");
     const vault = tmp("stability-l2-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -411,10 +411,10 @@ describe("stability: retrieval under real budgets", () => {
   }, 15000);
 
   test("UTF-8 cursor pagination preserves content within byte ceiling", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { recall, readChunk } = await import("../src/retrieval");
-    const { Budgets } = await import("../src/config");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
+    const { recall, readChunk } = await import("@/retrieval");
+    const { Budgets } = await import("@/config");
     const vault = tmp("stability-cursor-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -443,10 +443,10 @@ describe("stability: retrieval under real budgets", () => {
   }, 15000);
 
   test("stale ref rejected after content changes (old chunk gone)", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { recall, readChunk } = await import("../src/retrieval");
-    const { Budgets } = await import("../src/config");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
+    const { recall, readChunk } = await import("@/retrieval");
+    const { Budgets } = await import("@/config");
     const vault = tmp("stability-stale-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -463,10 +463,10 @@ describe("stability: retrieval under real budgets", () => {
   }, 15000);
 
   test("adaptive candidate target follows query complexity", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { recall } = await import("../src/retrieval");
-    const { Budgets } = await import("../src/config");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
+    const { recall } = await import("@/retrieval");
+    const { Budgets } = await import("@/config");
     const vault = tmp("stability-adaptive-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -481,10 +481,10 @@ describe("stability: retrieval under real budgets", () => {
   }, 15000);
 
   test("disputed guidance stays hidden outside history mode", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { recall } = await import("../src/retrieval");
-    const { Budgets } = await import("../src/config");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
+    const { recall } = await import("@/retrieval");
+    const { Budgets } = await import("@/config");
     const vault = tmp("stability-disputed-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -500,10 +500,10 @@ describe("stability: retrieval under real budgets", () => {
   }, 15000);
 
   test("per-arm cap prevents crowding", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { recall } = await import("../src/retrieval");
-    const { Budgets } = await import("../src/config");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
+    const { recall } = await import("@/retrieval");
+    const { Budgets } = await import("@/config");
     const vault = tmp("stability-cap-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -521,11 +521,11 @@ describe("stability: retrieval under real budgets", () => {
 
 describe("stability: isolation and provenance", () => {
   test("unattached and detached team notes are neither indexed nor recalled", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { ensureTeam, attachTeam, getAttachedTeams } = await import("../src/agents");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { recall } = await import("../src/retrieval");
-    const { Budgets } = await import("../src/config");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { ensureTeam, attachTeam, getAttachedTeams } = await import("@/agents");
+    const { openIndex, syncVault } = await import("@/index");
+    const { recall } = await import("@/retrieval");
+    const { Budgets } = await import("@/config");
     const { readFile } = await import("node:fs/promises");
     const vault = tmp("stability-team-acl-");
     await ensureVault(vault, "alice");
@@ -553,10 +553,10 @@ describe("stability: isolation and provenance", () => {
   }, 15000);
 
   test("cross-bank recall does not leak private content", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { recall } = await import("../src/retrieval");
-    const { Budgets } = await import("../src/config");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
+    const { recall } = await import("@/retrieval");
+    const { Budgets } = await import("@/config");
     const vault = tmp("stability-cross-");
     await ensureVault(vault, "alice");
     await ensureVault(vault, "bob");
@@ -575,10 +575,10 @@ describe("stability: isolation and provenance", () => {
   }, 15000);
 
   test("forged ref with wrong owner rejected", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { recall, readChunk, decodeRef } = await import("../src/retrieval");
-    const { Budgets } = await import("../src/config");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
+    const { recall, readChunk, decodeRef } = await import("@/retrieval");
+    const { Budgets } = await import("@/config");
     const vault = tmp("stability-forged-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -593,13 +593,13 @@ describe("stability: isolation and provenance", () => {
   }, 15000);
 
   test("secret rejected on remember and reflection", async () => {
-    const { ensureVault } = await import("../src/vault");
+    const { ensureVault } = await import("@/vault");
     const vault = tmp("stability-secret-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
-    const { remember } = await import("../src/memory");
+    const { remember } = await import("@/memory");
     await expect(remember(vault, aRoot, "alice", { statement: "key is sk-123456789012345678901234567890" })).rejects.toThrow();
-    const { validateProposal } = await import("../src/reflection");
+    const { validateProposal } = await import("@/reflection");
     expect(validateProposal({ id: "p1", action: "create", rationale: "r", sourceRefs: ["s1"], after: "contains sk-123456789012345678901234567890" } as any, vault).ok).toBe(false);
     cleanup(vault);
   }, 15000);
@@ -607,9 +607,9 @@ describe("stability: isolation and provenance", () => {
 
 describe("stability: forgetting and lifecycle", () => {
   test("forget is two-phase and cascading", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { forgetPlan, forgetConfirm } = await import("../src/memory");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
+    const { forgetPlan, forgetConfirm } = await import("@/memory");
     const vault = tmp("stability-forget-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -632,11 +632,11 @@ describe("stability: forgetting and lifecycle", () => {
   }, 15000);
 
   test("forget scrubs private derivatives and receipt omits target", async () => {
-    const { ensureVault, atomicWrite, hashContent } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { forgetPlan, forgetConfirm, record, recordConsultedUsage, recordRecallUsage } = await import("../src/memory");
-    const { Budgets } = await import("../src/config");
-    const { getRetrievalUsage, readChunk, recall } = await import("../src/retrieval");
+    const { ensureVault, atomicWrite, hashContent } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
+    const { forgetPlan, forgetConfirm, record, recordConsultedUsage, recordRecallUsage } = await import("@/memory");
+    const { Budgets } = await import("@/config");
+    const { getRetrievalUsage, readChunk, recall } = await import("@/retrieval");
     const { readFile } = await import("node:fs/promises");
     const vault = tmp("stability-forget-derivatives-");
     await ensureVault(vault, "alice");
@@ -715,8 +715,8 @@ describe("stability: forgetting and lifecycle", () => {
   }, 15000);
 
   test("forget preserves snapshots still referenced by retained revisions", async () => {
-    const { ensureVault, atomicWrite, hashContent } = await import("../src/vault");
-    const { forgetPlan, forgetConfirm } = await import("../src/memory");
+    const { ensureVault, atomicWrite, hashContent } = await import("@/vault");
+    const { forgetPlan, forgetConfirm } = await import("@/memory");
     const vault = tmp("stability-forget-shared-snapshot-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -743,8 +743,8 @@ describe("stability: forgetting and lifecycle", () => {
   }, 15000);
 
   test("forget follows derivative chains to fixed point", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { forgetPlan, forgetConfirm } = await import("../src/memory");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { forgetPlan, forgetConfirm } = await import("@/memory");
     const { readFile } = await import("node:fs/promises");
     const vault = tmp("stability-forget-chain-");
     await ensureVault(vault, "alice");
@@ -784,8 +784,8 @@ describe("stability: forgetting and lifecycle", () => {
   }, 15000);
 
   test("forget candidate cannot escape agent root", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { forgetPlan, forgetConfirm } = await import("../src/memory");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { forgetPlan, forgetConfirm } = await import("@/memory");
     const { readFile } = await import("node:fs/promises");
     const vault = tmp("stability-escape-");
     await ensureVault(vault, "alice");
@@ -800,8 +800,8 @@ describe("stability: forgetting and lifecycle", () => {
   }, 15000);
 
   test("proposal requires sources/rationale, rejects self-citation and stale base", async () => {
-    const { validateProposal } = await import("../src/reflection");
-    const { hashContent } = await import("../src/vault");
+    const { validateProposal } = await import("@/reflection");
+    const { hashContent } = await import("@/vault");
     const vault = tmp("stability-proposal-");
     expect(validateProposal({ id: "p1", action: "create", rationale: "r", sourceRefs: [], after: "x" } as any, vault).ok).toBe(false);
     expect(validateProposal({ id: "p2", action: "create", rationale: "", sourceRefs: ["s1"], after: "x" } as any, vault).ok).toBe(false);
@@ -814,9 +814,9 @@ describe("stability: forgetting and lifecycle", () => {
   }, 15000);
 
   test("stageProposals enforces current target hash", async () => {
-    const { ensureVault, atomicWrite, hashContent } = await import("../src/vault");
-    const { record } = await import("../src/memory");
-    const { stageProposals } = await import("../src/reflection");
+    const { ensureVault, atomicWrite, hashContent } = await import("@/vault");
+    const { record } = await import("@/memory");
+    const { stageProposals } = await import("@/reflection");
     const { readFile } = await import("node:fs/promises");
     const vault = tmp("stability-stage-");
     await ensureVault(vault, "alice");
@@ -855,10 +855,10 @@ describe("stability: forgetting and lifecycle", () => {
 
 describe("stability: MCP behavior and budgets", () => {
   test("recall packet stays bounded as history grows", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { recall } = await import("../src/retrieval");
-    const { Budgets } = await import("../src/config");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
+    const { recall } = await import("@/retrieval");
+    const { Budgets } = await import("@/config");
     const vault = tmp("stability-bounded-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -876,11 +876,11 @@ describe("stability: MCP behavior and budgets", () => {
   }, 15000);
 
   test("concurrent record appends do not corrupt evidence", async () => {
-    const { ensureVault } = await import("../src/vault");
+    const { ensureVault } = await import("@/vault");
     const vault = tmp("stability-conc-ev-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
-    const { record } = await import("../src/memory");
+    const { record } = await import("@/memory");
     const ops = Array.from({ length: 8 }, (_, i) => record(vault, aRoot, "alice", {
       kind: "observation",
       data: { idx: i },

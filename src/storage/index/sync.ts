@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import path from "node:path";
 import { readdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { ACCESS_FRONTMATTER_KEY, chunkMarkdown, decodeAccessValue, hashContent, parseFrontmatter, wikiLinks } from "../vault";
+import { ACCESS_FRONTMATTER_KEY, chunkMarkdown, decodeAccessValue, hashContent, parseFrontmatter, wikiLinks } from "@/storage/vault";
 import { repairMissingVectors, refreshVectorMeta } from "./embedding";
 import { buildSurfacesForChunk, insertSurfaces, purgeSurfacesForChunkIds, repairMissingSurfaceVectors } from "./surfaces";
 import { extractNumericEvidence, numericChronology } from "./ledger";

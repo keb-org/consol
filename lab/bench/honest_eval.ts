@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { ensureVault, atomicWrite, frontmatter, stableId } from "../src/vault";
-import { openIndex, syncVault, setEmbedderForTests } from "../src/index";
-import { recall } from "../src/retrieval";
-import { Budgets } from "../src/config";
+import { ensureVault, atomicWrite, frontmatter, stableId } from "@/vault";
+import { openIndex, syncVault, setEmbedderForTests } from "@/index";
+import { recall } from "@/retrieval";
+import { Budgets } from "@/config";
 
 const BEAM_ROOT = "D:/KEB/consol/.research/BEAM/chats";
 const STOP = new Set(["should","contain","mention","state","the","and","for","with","that","have","you","also","your","from","into","been","being","this","these","about","over","there","what","which","when","where","how","will","would","could","might","response","llm","based","provided","chat","there","information","related"]);

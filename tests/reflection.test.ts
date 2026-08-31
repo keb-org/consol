@@ -12,9 +12,9 @@ import {
   type EvidenceRecord,
   type Job,
   type Proposal,
-} from "../src/reflection";
-import { record } from "../src/memory";
-import { atomicWrite, ensureVault, hashContent } from "../src/vault";
+} from "@/reflection";
+import { record } from "@/memory";
+import { atomicWrite, ensureVault, hashContent } from "@/vault";
 
 function tmp(prefix: string) {
   return mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -226,9 +226,9 @@ describe("reflection validation", () => {
         kind: "outcome",
         data: { outcome: "failure", evaluator: "fail", task: "deploy" },
       });
-      const { openIndex, syncVault } = await import("../src/index");
-      const { recall } = await import("../src/retrieval");
-      const { Budgets } = await import("../src/config");
+      const { openIndex, syncVault } = await import("@/index");
+      const { recall } = await import("@/retrieval");
+      const { Budgets } = await import("@/config");
       const note = path.join(agentRoot, "memories", "guidance.md");
       await atomicWrite(note, "---\nid: guidance\nkind: memory\n---\nDeploy guidance\n");
       const db = openIndex(agentRoot);

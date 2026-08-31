@@ -1,4 +1,4 @@
-import { extractTypedAnchors } from "../core/parse";
+import { extractTypedAnchors } from "@/core/parse";
 import { nearDuplicateStatement } from "./transfer";
 import type { ChunkRow, PacketItem, Scored } from "./packet";
 

@@ -2,15 +2,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Database } from "bun:sqlite";
 import { z } from "zod";
-import pkg from "../../package.json";
-import { resolveConfig } from "../core/config";
-import { getAttachedTeams, sanitizeId } from "../core/identity";
-import { ensureVault } from "../storage/vault";
-import { openIndex } from "../storage/index/schema";
-import { syncVault } from "../storage/index/sync";
-import { decodeRef, getRetrievalUsage, recall, readChunk, type Packet, type RecallMode, type RetrievalUsageItem } from "../retrieval";
-import { remember, record, recordConsultedUsage, recordRecallUsage, readNote } from "../lifecycle/write";
-import { forgetPlan, forgetConfirm } from "../storage/erasure";
+import pkg from "@package";
+import { resolveConfig } from "@/core/config";
+import { getAttachedTeams, sanitizeId } from "@/core/identity";
+import { ensureVault } from "@/storage/vault";
+import { openIndex } from "@/storage/index/schema";
+import { syncVault } from "@/storage/index/sync";
+import { decodeRef, getRetrievalUsage, recall, readChunk, type Packet, type RecallMode, type RetrievalUsageItem } from "@/retrieval";
+import { remember, record, recordConsultedUsage, recordRecallUsage, readNote } from "@/lifecycle/write";
+import { forgetPlan, forgetConfirm } from "@/storage/erasure";
 
 export type AgentCtx = { agent: string; aRoot: string; db: Database; teamOwners: Set<string>; syncWarning?: string };
 export type UsageHooks = {

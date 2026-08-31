@@ -4,8 +4,8 @@ import os from "node:os";
 import { mkdtempSync, rmSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createServer } from "../src/mcp";
-import { atomicWrite, ensureVault } from "../src/vault";
+import { createServer } from "@/mcp";
+import { atomicWrite, ensureVault } from "@/vault";
 
 function tmp(prefix: string) {
   return mkdtempSync(path.join(os.tmpdir(), prefix));

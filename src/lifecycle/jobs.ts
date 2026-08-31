@@ -2,10 +2,10 @@ import path from "node:path";
 import { readFile, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { Database } from "bun:sqlite";
-import { atomicWrite, hashContent, stableId, withVaultLock } from "../storage/vault";
-import { recall } from "../retrieval/recall";
-import { redactSecrets } from "../core/security";
-import type { VaultConfig } from "../core/config";
+import { atomicWrite, hashContent, stableId, withVaultLock } from "@/storage/vault";
+import { recall } from "@/retrieval/recall";
+import { redactSecrets } from "@/core/security";
+import type { VaultConfig } from "@/core/config";
 import { evidenceCue, evidenceRecords, reviewedIds, selectEvidence, type EvidenceRecord } from "./evidence";
 import {
   packetSourceRefs,
@@ -50,7 +50,7 @@ export async function buildPacket(
   if (evidence.length === 0) return { query: "recent learning", items: [], evidence: [] };
   const query = evidenceCue(evidence);
   const agent = path.basename(agentRoot);
-  const { getAttachedTeams } = await import("../core/identity");
+  const { getAttachedTeams } = await import("@/core/identity");
   const pkt = await recall(
     db,
     vault,
@@ -324,7 +324,7 @@ export async function stageProposals(
   let indexError: string | undefined;
   if (db && prepared.mutations.length) {
     try {
-      const { syncVault } = await import("../storage/index/sync");
+      const { syncVault } = await import("@/storage/index/sync");
       await syncVault(db, vault, agentRoot, agent);
     } catch {
       indexError = "canonical mutation committed; index sync failed, run reindex";

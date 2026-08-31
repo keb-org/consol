@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import path from "node:path";
-import { EMBED_DIMS, indexFingerprint, SURFACE_SCHEMA_VERSION, SURFACE_DERIVATION_VERSION } from "../../core/config";
+import { EMBED_DIMS, indexFingerprint, SURFACE_SCHEMA_VERSION, SURFACE_DERIVATION_VERSION } from "@/core/config";
 
 export function metaValue(db: Database, key: string): string | undefined {
   return (db.query("SELECT value FROM meta WHERE key=?").get(key) as { value: string } | null)?.value;

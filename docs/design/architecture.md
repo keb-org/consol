@@ -1,7 +1,7 @@
 # Architecture — Target and Current Boundary
 
-Status: target architecture; shipped behavior is named explicitly below
-Last updated: 2026-08-29
+Status: shipped v0.2.x boundary plus active target architecture
+Last updated: 2026-08-31
 
 ## 1. Contract
 
@@ -10,11 +10,11 @@ One Bun MCP process serves multiple validated per-call agent banks. One stdio MC
 ```text
 Agent host / OS scheduler
         |
-  stdio MCP + local CLI
+  stdio MCP + local CLI (src/main.ts)
         |
-  memory application core
+  SOLID domain hierarchy (@/*)
    |       |        |
- vault   retrieval  reflection / coordination
+ vault   retrieval  lifecycle / reflection
    |       |        |
  files   SQLite     interchangeable LLM runner
    |    FTS5 + vec0 |
@@ -22,35 +22,42 @@ Agent host / OS scheduler
              |
       bounded context packet
              |
-       optional Caveman (explicit opt-in)
+      protocol co-design
 ```
 
-- No Docker, no Postgres/pgvector, no Redis, no graph DB, no web UI, no required daemon.
+- Zero Docker, no Postgres/pgvector, no Redis, no graph DB, no web UI, no required daemon.
 - Obsidian is an optional editor over the vault, never a runtime dependency.
-- Canonical state is files. SQLite is a derived, rebuildable index. Deleting `index.sqlite` must not lose knowledge.
-- First use initializes vault and index. Setup downloads pinned q8 model into vault-local cache; after cache warmup, vector indexing and retrieval run 100% offline. Missing `sqlite-vec` gives explicit lexical-only degradation.
-- Learning means held-out future tasks improve under equal model, tools, environment, and context budget. Storage count, summary polish, similarity, and model confidence are not learning.
+- Canonical state is files on disk. SQLite is a derived, disposable, rebuildable index. Deleting `index.sqlite` causes zero data loss.
+- First use initializes vault and index. Setup downloads pinned q8 model (`Xenova/all-MiniLM-L6-v2`) into vault-local cache; after cache warmup, vector indexing and retrieval run 100% offline.
+- Learning means held-out future tasks improve under equal model, tools, environment, and context budget.
 
-Related: [README](README.md) · [Rationale](rationale.md) · [Evaluation](evaluation.md) · [Open questions](open-questions.md)
+Related: [README](README.md) · [Rationale](rationale.md) · [Retrieval](retrieval-designs-and-decisions.md) · [Evaluation](evaluation.md)
 
 ## 2. Invariants
 
 ```text
-history/evidence != declarative memory
-memory != case
-case != experience
-experience != procedure/skill
-procedure != identity/core policy
+evidence != memory != case != experience != procedure != core
 private bank != team knowledge
 retrieved != consulted != applied != successful
 one success != learned
 similarity != factual support
 repetition / peer echo != independent corroboration
-prediction error != proof memory should change
 retrieval failure != source erasure
 model confidence != epistemic support
-compressed context != source truth
+protocol co-design > hardcoded dictionary bloat
 ```
+
+## 3. SOLID Domain Hierarchy
+
+The codebase is organized into strict single-responsibility domain modules with absolute path aliases:
+
+- `src/core/` — Primitives, config, constants (`RRF_K=60`), identity sanitization, parse utilities (`extractTypedAnchors`), security redactor.
+- `src/storage/` — Atomic vault file I/O, file locks, frontmatter parsing, erasure engine (`forgetPlan`/`forgetConfirm`), and the SQLite indexing subsystem (`src/storage/index/`: schema, sync, search, embeddings, surfaces, ledger).
+- `src/retrieval/` — Search orchestrator (`recall.ts`), RRF ranking + 3× ledger weighting (`ranking.ts`), wire packet encoder/decoder (`packet.ts`), state-aware evidence set (`evidence-set.ts`), transfer scoring (`transfer.ts`).
+- `src/lifecycle/` — Memory write mutations (`write.ts`), reflection job runner (`jobs.ts`, `runners.ts`), proposal validator (`proposals.ts`), FSM state machine (`state-machine.ts`).
+- `src/server/` — MCP server protocol adapter with compact schema definitions (`mcp.ts`).
+- `src/cli/` — CLI subcommands (`main.ts`: doctor, setup, reindex, reflect, rollback, serve).
+- `lab/` — Agent behavior laboratory: `lab/bench/` (benchmarks), `lab/observer/` (live event tracing), `lab/telemetry.ts` (protocol adherence metrics).
 
 ## 3. Runtime boundary
 

@@ -2,7 +2,7 @@ import { describe, test, expect } from "bun:test";
 
 describe("isolation", () => {
   test("opaque ref binds owner and hash", async () => {
-    const { decodeRef } = await import("../src/retrieval");
+    const { decodeRef } = await import("@/retrieval");
     const ref = Buffer.from(JSON.stringify({ c: 1, d: "doc", h: "abc123", o: "agent:alice" })).toString("base64url");
     const decoded = decodeRef(ref);
     expect(decoded.o).toBe("agent:alice");
@@ -16,13 +16,13 @@ describe("isolation", () => {
     expect(resolved.startsWith(agentRoot + path.sep)).toBe(false);
   });
   test("secret patterns are blocked", async () => {
-    const { remember } = await import("../src/memory");
+    const { remember } = await import("@/memory");
     const vault = "/tmp/vault-test-isolation";
     const agentRoot = "/tmp/vault-test-isolation/agents/alice";
     await expect(remember(vault, agentRoot, "alice", { statement: "my key is sk-abcdefghijklmnopqrstuvwxyz123456" })).rejects.toThrow();
   });
   test("agent and team direct filesystem management", async () => {
-    const { ensureAgent, ensureTeam, attachTeam, getAttachedTeams } = await import("../src/agents");
+    const { ensureAgent, ensureTeam, attachTeam, getAttachedTeams } = await import("@/agents");
     const { readFile, rm } = await import("node:fs/promises");
     const os = await import("node:os");
     const path = await import("node:path");
@@ -50,7 +50,7 @@ describe("isolation", () => {
 
       // Direct file edit test
       aliceRaw.role = "principal";
-      const { atomicWrite } = await import("../src/vault");
+      const { atomicWrite } = await import("@/vault");
       await atomicWrite(path.join(vault, "agents", "alice", "agent.json"), JSON.stringify(aliceRaw));
       const updated = JSON.parse(await readFile(path.join(vault, "agents", "alice", "agent.json"), "utf8"));
       expect(updated.role).toBe("principal");

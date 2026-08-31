@@ -2,11 +2,11 @@ import path from "node:path";
 import { readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { Database } from "bun:sqlite";
-import { ACCESS_FRONTMATTER_KEY, atomicWrite, appendJsonl, encodeAccessValue, evidencePath, frontmatter, notePath, parseFrontmatter, stableId, withVaultLock } from "../storage/vault";
-import { syncVault } from "../storage/index/sync";
-import { containsSecret } from "../core/security";
-import { nearDuplicateStatement } from "../retrieval/transfer";
-import type { Packet, RetrievalUsageItem } from "../retrieval/packet";
+import { ACCESS_FRONTMATTER_KEY, atomicWrite, appendJsonl, encodeAccessValue, evidencePath, frontmatter, notePath, parseFrontmatter, stableId, withVaultLock } from "@/storage/vault";
+import { syncVault } from "@/storage/index/sync";
+import { containsSecret } from "@/core/security";
+import { nearDuplicateStatement } from "@/retrieval/transfer";
+import type { Packet, RetrievalUsageItem } from "@/retrieval/packet";
 
 export type AccessIntent = {
   aliases?: string[];
@@ -309,7 +309,7 @@ export async function readNote(agentRoot: string, docId: string) {
   const vault = path.dirname(path.dirname(agentRoot));
   const teamsRoot = path.join(vault, "teams");
   if (existsSync(teamsRoot)) {
-    const { getAttachedTeams } = await import("../core/identity");
+    const { getAttachedTeams } = await import("@/core/identity");
     const agent = path.basename(agentRoot);
     for (const owner of await getAttachedTeams(vault, agent)) {
       const team = owner.slice("team:".length);

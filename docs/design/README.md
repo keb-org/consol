@@ -1,20 +1,21 @@
-# Consol Design Notes
+# Consol Design & Architecture Notes
 
-Status: shipped boundary plus measured target; see [architecture](architecture.md)
-Last updated: 2026-08-29
+Status: shipped v0.2.x boundary plus active target architecture; see [architecture](architecture.md)
+Last updated: 2026-08-31
 
-Local, token-efficient memory and experience evidence for Claude Code, Codex, Claude Desktop, and other MCP hosts.
+Local, token-efficient, inspectable memory engine and experience distillation harness for Claude Code, Codex, Claude Desktop, and other MCP hosts.
 
-**One command** — `consol serve --vault <path> --agent <default-id>` — starts one Bun stdio MCP process. Optional `agent` on each tool call routes multiple private banks. Vault-local q8 model auto-downloads once when vectors are available, then retrieval runs offline. No Docker, Postgres, Redis, graph DB, required daemon, or custom frontend.
+**One command** — `bun run src/main.ts serve --vault <path> --agent <default-id>` or `consol serve` — starts the Bun stdio MCP server. Optional `agent` parameter on every tool call routes across isolated agent banks (`linus`, `ilya`, etc.). Pinned local q8 embedding model (`Xenova/all-MiniLM-L6-v2`) downloads into vault-local cache on first run and runs 100% offline thereafter. Zero Docker, zero Postgres/pgvector, zero cloud lock-in.
 
 | Doc | Purpose |
 |---|---|
-| [Architecture](architecture.md) | Shipped boundary and target: files-only truth, q8 hybrid RAG, bounded retrieval, reflection, multi-agent mail, Caveman option |
-| [Rationale](rationale.md) | Principles, ADRs, rejected alternatives, when to change them |
-| [Evaluation](evaluation.md) | What proves learning vs storage; gates for embeddings/scheduler/Caveman |
-| [Open questions](open-questions.md) | Unresolved calibration questions that need measurement |
+| [Architecture](architecture.md) | SOLID domain hierarchy, multi-arm RRF, ledger intent gating, lifecycle state machine, MCP protocol |
+| [Rationale](rationale.md) | Governing principles, prompt-protocol co-design vs dictionary bloat, ADRs |
+| [Retrieval Designs](retrieval-designs-and-decisions.md) | RRF fusion, 3× ledger arm, access_v1 hidden routing surfaces, typed anchors |
+| [Evaluation](evaluation.md) | BEAM benchmark harness, honest evaluation, lab observer & telemetry |
+| [Open questions](open-questions.md) | Unresolved calibration questions and empirical frontiers |
 
-## Invariants
+## Core Invariants
 
 ```text
 evidence != memory != case != experience != procedure != core
@@ -25,21 +26,12 @@ similarity != factual support
 repetition / peer echo != independent corroboration
 retrieval failure != source erasure
 model confidence != epistemic support
-compressed context != source truth
+protocol co-design > hardcoded dictionaries
 ```
 
-## How shipped flow works
+## Shipped Runtime System
 
-Explicit assertions become Markdown; observations/outcomes become JSONL evidence; reflection may create or update candidate notes; recall returns bounded descriptors; host reads opaque refs and explicitly records applied guidance plus outcome. SQLite is a disposable FTS5/optional-`vec0` index. Six tools: `recall / read / remember / record / forget / send` — admin stays CLI/internal.
-
-## Retrieval
-
-Exact IDs run first, then bounded BM25 and optional `vec0` vector arms are capped independently and fused with equal-weight RRF `k=60`. Authorized one-hop wiki-link expansion and typed quotas feed adaptive 10/20/30 descriptor targets. Progressive disclosure: L0 summary, small current L1 overview/section cue, UTF-8 byte-bounded L2 pages via `read`.
-
-## Reflection and lifecycle
-
-Reflection currently accepts only `create`, `update`, and `skip`; invalid or empty runs remain retryable. Inferred notes start `candidate`. Explicit lifecycle transitions can stage, activate, dispute, retire, or supersede notes; activation needs two distinct successful application roots. Semantic entailment, recursive lineage checks, automatic contradiction handling, utility decay, and demonstrated task-level transfer remain target/evaluation work. Human-memory ideas are functional hypotheses, not biological claims.
-
-## Change discipline
-
-Measure first. A new dep/service/tool survives only if equal-model, equal-budget evaluation shows task success improves. Update this doc set together; no silent scope creep.
+- **Canonical Storage**: Markdown files on local disk (vault) are ground truth. Disposable SQLite index projections (`chunks`, `chunk_vectors`, `numeric_ledger`, `retrieval_surfaces`).
+- **Code Organization**: SOLID domain-driven directory structure (`src/core/`, `src/storage/`, `src/retrieval/`, `src/lifecycle/`, `src/server/`, `src/cli/`). Absolute `@/*` path aliases with zero `../` traversals.
+- **Tools**: MCP protocol tools (`recall / read / remember / record / forget`).
+- **Lab & Observability**: Dedicated `lab/` tree with `lab/bench/` (BEAM suites), `lab/observer/` (live event tracing), and `lab/telemetry.ts` (agent protocol adherence).

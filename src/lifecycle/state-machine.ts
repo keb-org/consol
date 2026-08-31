@@ -2,7 +2,7 @@ import path from "node:path";
 import { readFile, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { Database } from "bun:sqlite";
-import { atomicWrite, hashContent, parseFrontmatter, stableId, withVaultLock } from "../storage/vault";
+import { atomicWrite, hashContent, parseFrontmatter, stableId, withVaultLock } from "@/storage/vault";
 import { evidenceRecords, independentSuccessRoots } from "./evidence";
 import { SAFE_ID, splitRefs, TARGET_DIRS, type ProposalAction } from "./proposals";
 
@@ -149,7 +149,7 @@ export async function transitionCandidate(
     }
   });
   if (db) {
-    const { syncVault } = await import("../storage/index/sync");
+    const { syncVault } = await import("@/storage/index/sync");
     await syncVault(db, vault, agentRoot, agent);
   }
   return { targetId, fromStatus, toStatus, revisionId: revision.id };
@@ -245,7 +245,7 @@ export async function rollbackRevision(
     }
   });
   if (db) {
-    const { syncVault } = await import("../storage/index/sync");
+    const { syncVault } = await import("@/storage/index/sync");
     await syncVault(db, vault, agentRoot, agent);
   }
   return {

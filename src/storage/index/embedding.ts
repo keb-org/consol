@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { EMBED_DIMS, MODEL_DTYPE, MODEL_ID, MODEL_REVISION, vaultModelCache } from "../../core/config";
+import { EMBED_DIMS, MODEL_DTYPE, MODEL_ID, MODEL_REVISION, vaultModelCache } from "@/core/config";
 import { metaValue, setMeta, deleteMeta, vectorTableAvailable, vectorCount } from "./schema";
 
 let embedder: any = null;

@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { resolveConfig, agentRoot, vaultModelCache } from "../core/config";
-import { ensureVault } from "../storage/vault";
-import { openIndex } from "../storage/index/schema";
-import { syncVault, rebuild } from "../storage/index/sync";
-import { vectorStatus } from "../storage/index/embedding";
-import { createJob, stageProposals } from "../lifecycle/jobs";
-import { rollbackRevision } from "../lifecycle/state-machine";
-import { runReflection } from "../lifecycle/runners";
-import { serve } from "../server/mcp";
+import { resolveConfig, agentRoot, vaultModelCache } from "@/core/config";
+import { ensureVault } from "@/storage/vault";
+import { openIndex } from "@/storage/index/schema";
+import { syncVault, rebuild } from "@/storage/index/sync";
+import { vectorStatus } from "@/storage/index/embedding";
+import { createJob, stageProposals } from "@/lifecycle/jobs";
+import { rollbackRevision } from "@/lifecycle/state-machine";
+import { runReflection } from "@/lifecycle/runners";
+import { serve } from "@/server/mcp";
 
 function parseArgs(argv: string[]): Record<string, string | boolean | undefined> {
   const out: Record<string, string | boolean | undefined> = {};
@@ -43,7 +43,7 @@ async function cmdDoctor(args: Record<string, string | boolean | undefined>) {
     vector = vectorStatus(db);
     db.close();
   }
-  console.log(JSON.stringify({ config: { vault: config.vault, agent: config.agent, fingerprint: (await import("../core/config")).indexFingerprint() }, vector, checks }, null, 2));
+  console.log(JSON.stringify({ config: { vault: config.vault, agent: config.agent, fingerprint: (await import("@/core/config")).indexFingerprint() }, vector, checks }, null, 2));
 }
 
 async function cmdSetup(args: Record<string, string | boolean | undefined>) {
@@ -52,7 +52,7 @@ async function cmdSetup(args: Record<string, string | boolean | undefined>) {
   const db = openIndex(aRoot);
   await syncVault(db, config.vault, aRoot, config.agent);
   try {
-    const { getEmbedder } = await import("../storage/index/embedding");
+    const { getEmbedder } = await import("@/storage/index/embedding");
     await getEmbedder(config.vault);
     console.log(JSON.stringify({ ok: true, vault: config.vault, agent: config.agent, cache: vaultModelCache(config.vault) }));
   } catch (e: any) {

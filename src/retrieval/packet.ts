@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
-import type { Budgets } from "../core/config";
-import type { NumericLedgerSearchRow } from "../storage/index/search";
+import type { Budgets } from "@/core/config";
+import type { NumericLedgerSearchRow } from "@/storage/index/search";
 
 export type RecallMode = "auto" | "facts" | "guidance" | "history";
 

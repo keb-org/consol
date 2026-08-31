@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
-import { RRF_K } from "../src/config";
-import { ensureSchema, numericLedgerSearch } from "../src/index";
+import { RRF_K } from "@/config";
+import { ensureSchema, numericLedgerSearch } from "@/index";
 
 function rrf(rank: number) { return 1 / (RRF_K + rank); }
 

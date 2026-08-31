@@ -1,7 +1,8 @@
 import { Database } from "bun:sqlite";
-import type { Budgets } from "../core/config";
-import { embedTexts, vectorStatus } from "../storage/index/embedding";
-import { ftsSearch, numericLedgerSearch, surfaceFtsSearch, surfaceVecSearch, vecSearch, type NumericLedgerSearchRow } from "../storage/index/search";
+import type { Budgets } from "@/core/config";
+import { extractTypedAnchors } from "@/core/parse";
+import { embedTexts, vectorStatus } from "@/storage/index/embedding";
+import { ftsSearch, numericLedgerSearch, surfaceFtsSearch, surfaceVecSearch, vecSearch, type NumericLedgerSearchRow } from "@/storage/index/search";
 import { dedupByStatement, selectEvidenceSet } from "./evidence-set";
 import {
   fitPacket,
@@ -55,7 +56,8 @@ function inferTarget(query: string): 10 | 20 | 30 {
 }
 
 function hasNumericIntent(query: string): boolean {
-  return true;
+  if (/\d|[$€£¥₫₩₽฿₪₴₦₵%]|\bv\d/i.test(query)) return true;
+  return extractTypedAnchors(query, 1).length > 0;
 }
 
 function fetchAuthorized(

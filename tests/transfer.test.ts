@@ -2,12 +2,12 @@ import { describe, test, expect } from "bun:test";
 import path from "node:path";
 import os from "node:os";
 import { mkdtempSync, rmSync } from "node:fs";
-import { atomicWrite, ensureVault } from "../src/vault";
-import { openIndex, syncVault, setEmbedderForTests } from "../src/index";
-import { recall } from "../src/retrieval";
-import { remember } from "../src/memory";
-import { Budgets } from "../src/config";
-import { abstractionLevel, nearDuplicateStatement, tokenEstimate, transferBoost, valuePerToken } from "../src/transfer";
+import { atomicWrite, ensureVault } from "@/vault";
+import { openIndex, syncVault, setEmbedderForTests } from "@/index";
+import { recall } from "@/retrieval";
+import { remember } from "@/memory";
+import { Budgets } from "@/config";
+import { abstractionLevel, nearDuplicateStatement, tokenEstimate, transferBoost, valuePerToken } from "@/transfer";
 
 describe("transfer invariants", () => {
   test("reusable kinds outrank specifics; watermelon still recalls irrigate principle", async () => {

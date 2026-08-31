@@ -3,7 +3,7 @@ import {
   parseClaudeOutput,
   parseCodexOutput,
   parseEndpointOutput,
-} from "../src/runners";
+} from "@/runners";
 
 const proposal = {
   id: "skip-1",

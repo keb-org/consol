@@ -1,4 +1,4 @@
-import { parseFrontmatter } from "../storage/vault";
+import { parseFrontmatter } from "@/storage/vault";
 
 export type ReusableClass = "principle" | "pattern" | "specific";
 

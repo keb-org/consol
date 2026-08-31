@@ -10,16 +10,16 @@ function cleanup(dir: string) { try { rmSync(dir, { recursive: true, force: true
 describe("adversarial & edge-case suite", () => {
   const MOCK_EMBED = async (texts: string[]) => texts.map(() => Array(384).fill(0.01));
   test("SQL injection attempts in search queries fail safely without throwing or corrupting", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { recall } = await import("../src/retrieval");
-    const { Budgets } = await import("../src/config");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
+    const { recall } = await import("@/retrieval");
+    const { Budgets } = await import("@/config");
 
     const vault = tmp("adv-sql-");
     try {
       const { agentRoot } = await ensureVault(vault, "alice");
       await atomicWrite(path.join(agentRoot, "memories", "doc.md"), "---\nid: doc\nkind: memory\n---\nProduction db creds\n");
-      const { setEmbedderForTests: _mockEmbed } = await import("../src/index");
+      const { setEmbedderForTests: _mockEmbed } = await import("@/index");
       _mockEmbed(MOCK_EMBED, vault);
       const db = openIndex(agentRoot);
       await syncVault(db, vault, agentRoot, "alice");
@@ -53,10 +53,10 @@ describe("adversarial & edge-case suite", () => {
   });
 
   test("unicode, emoji, RTL, zero-width characters and multi-megabyte payloads handled gracefully", async () => {
-    const { ensureVault, atomicWrite, hashContent } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { recall, readChunk } = await import("../src/retrieval");
-    const { Budgets } = await import("../src/config");
+    const { ensureVault, atomicWrite, hashContent } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
+    const { recall, readChunk } = await import("@/retrieval");
+    const { Budgets } = await import("@/config");
 
     const vault = tmp("adv-unicode-");
     try {
@@ -75,7 +75,7 @@ Emoji: 🤖🧠💾🔒⚡️🎯
 Math symbols: ∀x ∈ ℝ, ∃y: y > x ∧ ∫ f(x)dx = F(x) + C
 `;
       await atomicWrite(path.join(agentRoot, "memories", "unicode.md"), weirdContent);
-      const { setEmbedderForTests: _mockEmbed } = await import("../src/index");
+      const { setEmbedderForTests: _mockEmbed } = await import("@/index");
       _mockEmbed(MOCK_EMBED, vault);
       const db = openIndex(agentRoot);
       await syncVault(db, vault, agentRoot, "alice");
@@ -94,8 +94,8 @@ Math symbols: ∀x ∈ ℝ, ∃y: y > x ∧ ∫ f(x)dx = F(x) + C
   });
 
   test("corrupted / empty / malformed files do not crash vault sync", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
 
     const vault = tmp("adv-corrupt-");
     try {
@@ -115,7 +115,7 @@ Math symbols: ∀x ∈ ℝ, ∃y: y > x ∧ ∫ f(x)dx = F(x) + C
       const hugeLine = "A".repeat(2 * 1024 * 1024);
       writeFileSync(path.join(memDir, "huge-line.md"), `---\nid: huge\nkind: memory\n---\n${hugeLine}`);
 
-      const { setEmbedderForTests: _mockEmbed } = await import("../src/index");
+      const { setEmbedderForTests: _mockEmbed } = await import("@/index");
       _mockEmbed(MOCK_EMBED, vault);
       const db = openIndex(agentRoot);
       // Must not throw or hang
@@ -131,7 +131,7 @@ Math symbols: ∀x ∈ ℝ, ∃y: y > x ∧ ∫ f(x)dx = F(x) + C
   }, 15000);
 
   test("rapid concurrent lock acquisition and release maintains linear integrity", async () => {
-    const { ensureVault, withVaultLock, atomicWrite } = await import("../src/vault");
+    const { ensureVault, withVaultLock, atomicWrite } = await import("@/vault");
 
     const vault = tmp("adv-lock-");
     try {
@@ -158,9 +158,9 @@ Math symbols: ∀x ∈ ℝ, ∃y: y > x ∧ ∫ f(x)dx = F(x) + C
   });
 
   test("path traversal attacks on agent and memory APIs are blocked", async () => {
-    const { ensureVault } = await import("../src/vault");
-    const { ensureAgent, attachTeam } = await import("../src/agents");
-    const { forgetPlan } = await import("../src/memory");
+    const { ensureVault } = await import("@/vault");
+    const { ensureAgent, attachTeam } = await import("@/agents");
+    const { forgetPlan } = await import("@/memory");
 
     const vault = tmp("adv-traversal-");
     try {
@@ -182,16 +182,16 @@ Math symbols: ∀x ∈ ℝ, ∃y: y > x ∧ ∫ f(x)dx = F(x) + C
   });
 
   test("ref forgery with modified chunk_id or hash throws security error", async () => {
-    const { ensureVault, atomicWrite } = await import("../src/vault");
-    const { openIndex, syncVault } = await import("../src/index");
-    const { recall, readChunk, decodeRef } = await import("../src/retrieval");
-    const { Budgets } = await import("../src/config");
+    const { ensureVault, atomicWrite } = await import("@/vault");
+    const { openIndex, syncVault } = await import("@/index");
+    const { recall, readChunk, decodeRef } = await import("@/retrieval");
+    const { Budgets } = await import("@/config");
 
     const vault = tmp("adv-ref-");
     try {
       const { agentRoot } = await ensureVault(vault, "alice");
       await atomicWrite(path.join(agentRoot, "memories", "secret.md"), "---\nid: sec\nkind: memory\n---\nSecret data\n");
-      const { setEmbedderForTests: _mockEmbed } = await import("../src/index");
+      const { setEmbedderForTests: _mockEmbed } = await import("@/index");
       _mockEmbed(MOCK_EMBED, vault);
       const db = openIndex(agentRoot);
       await syncVault(db, vault, agentRoot, "alice");

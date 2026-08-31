@@ -7,6 +7,12 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "outDir": "dist",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@package": ["package.json"],
+      "@lab/*": ["lab/*"]
+    },
     "types": ["bun-types"]
   },
   "include": ["src", "tests"]

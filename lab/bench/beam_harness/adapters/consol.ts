@@ -3,10 +3,10 @@ import path from "node:path";
 import os from "node:os";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { ensureVault, atomicWrite, frontmatter, withVaultLock } from "../../../src/vault";
-import { openIndex, rebuild, vectorStatus } from "../../../src/index";
-import { recall as consolRecall, readChunk } from "../../../src/retrieval";
-import { Budgets, indexFingerprint } from "../../../src/config";
+import { ensureVault, atomicWrite, frontmatter, withVaultLock } from "@/vault";
+import { openIndex, rebuild, vectorStatus } from "@/index";
+import { recall as consolRecall, readChunk } from "@/retrieval";
+import { Budgets, indexFingerprint } from "@/config";
 import type { BeamAdapter, AdapterPacket, AdapterRead } from "./types";
 
 // Real-construction adapter — no dummy vectors, no role filtering, no 50-msg blobs.

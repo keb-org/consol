@@ -1,6 +1,6 @@
 import { $ } from "bun";
-import type { VaultConfig } from "../core/config";
-import { redactSecrets } from "../core/security";
+import type { VaultConfig } from "@/core/config";
+import { redactSecrets } from "@/core/security";
 import type { Proposal } from "./proposals";
 import type { Job } from "./jobs";
 

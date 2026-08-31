@@ -2,10 +2,10 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { Database } from "bun:sqlite";
-import { hashContent, parseFrontmatter } from "../storage/vault";
-import { decodeRef } from "../retrieval/packet";
-import { containsSecret } from "../core/security";
-import { abstractionLevel } from "../retrieval/transfer";
+import { hashContent, parseFrontmatter } from "@/storage/vault";
+import { decodeRef } from "@/retrieval/packet";
+import { containsSecret } from "@/core/security";
+import { abstractionLevel } from "@/retrieval/transfer";
 import type { EvidenceRecord } from "./evidence";
 
 export type ProposalAction = "create" | "update" | "skip";
@@ -90,7 +90,7 @@ export async function validatePacketItemRefs(
 ): Promise<Rejection[]> {
   if (!job.packet.items?.length) return [];
   if (!db) return [{ reason: "packet refs require current index validation" }];
-  const { getAttachedTeams } = await import("../core/identity");
+  const { getAttachedTeams } = await import("@/core/identity");
   const allowedOwners = new Set([`agent:${agent}`, ...await getAttachedTeams(vault, agent)]);
   const rejections: Rejection[] = [];
   for (const item of job.packet.items) {

@@ -6,11 +6,10 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "bin": {
-    "consol": "bin/consol.js",
-    "consol-server": "bin/consol.js"
+    "consol": "src/main.ts",
+    "consol-server": "src/main.ts"
   },
   "files": [
-    "bin",
     "src",
     "README.md",
     "SETUP.md",
@@ -40,6 +39,8 @@
     "sqlite-vec": "^0.1.9"
   },
   "devDependencies": {
+    "@earendil-works/pi-agent-core": "^0.84.4",
+    "@earendil-works/pi-ai": "^0.84.4",
     "bun-types": "^1.2.0",
     "typescript": "^5.6.0"
   },

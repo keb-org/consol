@@ -3,11 +3,11 @@ import path from "node:path";
 import os from "node:os";
 import { mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { Budgets } from "../src/config";
-import { openIndex, syncVault } from "../src/index";
-import { record, recordConsultedUsage, recordRecallUsage } from "../src/memory";
-import { getRetrievalUsage, readChunk, recall } from "../src/retrieval";
-import { atomicWrite, ensureVault } from "../src/vault";
+import { Budgets } from "@/config";
+import { openIndex, syncVault } from "@/index";
+import { record, recordConsultedUsage, recordRecallUsage } from "@/memory";
+import { getRetrievalUsage, readChunk, recall } from "@/retrieval";
+import { atomicWrite, ensureVault } from "@/vault";
 
 function tmp(prefix: string) {
   return mkdtempSync(path.join(os.tmpdir(), prefix));

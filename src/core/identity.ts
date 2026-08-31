@@ -1,7 +1,7 @@
 import path from "node:path";
 import { readFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { atomicWrite } from "../storage/vault";
+import { atomicWrite } from "@/storage/vault";
 
 export type AgentMeta = {
   id: string;

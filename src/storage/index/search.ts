@@ -7,7 +7,7 @@ import {
   extractTypedAnchors,
   numericQueryTerms,
   numericTokens,
-} from "../../core/parse";
+} from "@/core/parse";
 import { surfaceFtsAvailable, surfaceTableAvailable, surfaceVectorAvailable } from "./schema";
 
 export type NumericLedgerSearchRow = {
