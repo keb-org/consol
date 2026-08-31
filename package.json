@@ -1,15 +1,16 @@
 {
   "name": "@kryat/consol",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Local, inspectable memory and experience evidence for MCP agents",
   "type": "module",
-  "main": "./src/index.ts",
+  "main": "./dist/main.js",
   "types": "./src/index.ts",
   "bin": {
-    "consol": "src/main.ts",
-    "consol-server": "src/main.ts"
+    "consol": "./dist/main.js",
+    "consol-server": "./dist/main.js"
   },
   "files": [
+    "dist",
     "src",
     "README.md",
     "SETUP.md",
