@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { mkdtempSync, rmSync } from "node:fs";
 import { atomicWrite, ensureVault } from "../src/vault";
-import { openIndex, syncVault } from "../src/index";
+import { openIndex, syncVault, setEmbedderForTests } from "../src/index";
 import { recall } from "../src/retrieval";
 import { remember } from "../src/memory";
 import { Budgets } from "../src/config";
@@ -12,6 +12,13 @@ import { abstractionLevel, nearDuplicateStatement, tokenEstimate, transferBoost,
 describe("transfer invariants", () => {
   test("reusable kinds outrank specifics; watermelon still recalls irrigate principle", async () => {
     const vault = mkdtempSync(path.join(os.tmpdir(), "watermelon-invariants-"));
+    setEmbedderForTests(async (texts: string[]) => ({
+      tolist: () => texts.map((t) => {
+        const v = Array(384).fill(0.01);
+        if (t.includes("irrigate") || t.includes("water") || t.includes("Grow")) v[0] = 0.9;
+        return v;
+      }),
+    }), vault);
     try {
       const { agentRoot } = await ensureVault(vault, "alice");
       await remember(vault, agentRoot, "alice", { statement: "Grow 🍌 banana: irrigate deeply, mulch, stagger sowings." });
