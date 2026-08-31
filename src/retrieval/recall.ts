@@ -19,7 +19,7 @@ import {
   boostReusable,
   isTransferable,
   modeKinds,
-  oneHop,
+  multiHop,
   rankRows,
   rowAllowed,
   ACTIVE_STATUSES,
@@ -189,9 +189,9 @@ export async function recall(
   const ids = [...new Set([...lexCollapsed.keys(), ...vecCollapsed.keys(), ...ledgerRank.keys()])];
   const authorized = fetchAuthorized(db, ids, mode, ownerFilter, teams);
   const fused = rankRows(authorized, lexCollapsed, vecCollapsed, ledgerRank, ledgerByChunk);
-  const canonicalSeedIds = new Set([...lexRank.keys(), ...ledgerRank.keys()]);
+  const canonicalSeedIds = new Set([...lexRank.keys(), ...ledgerRank.keys(), ...[...vecRank.keys()].slice(0, 4)]);
   const hopSeeds = fused.filter((r) => canonicalSeedIds.has(r.chunk_id));
-  const expanded = oneHop(hopSeeds.length ? hopSeeds : fused.slice(0, 8), db, mode, ownerFilter, teams);
+  const expanded = multiHop(hopSeeds.length ? hopSeeds : fused.slice(0, 8), db, mode, ownerFilter, teams, 2);
   const hopExtra = expanded.filter((r) => !fused.some((f) => f.doc_id === r.doc_id));
   const hopAppended = [...fused, ...hopExtra];
   const evidenceSet = selectEvidenceSet(hopAppended, query, targetCandidates);

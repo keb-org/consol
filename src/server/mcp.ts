@@ -18,24 +18,14 @@ export type UsageHooks = {
   read?: (ctx: AgentCtx, input: { docId: string; owner: string; offset: number }) => Promise<void>;
 };
 
-const PROTOCOL_INSTRUCTIONS = `MANDATORY MEMORY PROTOCOL — Continuous injection mandatory. Single-recall-then-never violates protocol.
-
-LOOP:
-1. BEFORE: recall(query, agent). Read candidate notes with read(id).
-2. MID: recall again on branch, error, assumption fail, missing context.
-3. AFTER: record outcome='success'|'failure'|'partial', evaluator='pass'|'fail'|'mixed', links=[...].
-4. Subagents MUST inherit protocol.
-
-WRITE (remember/record):
-• Time: prefix '[Date: YYYY-MM-DD]'.
-• Values: verbatim numbers, currencies ($100, 1.5M₫, €50), versions (v1.2.3).
-• Cross-lingual: fill access.aliases/entities/facets/likelyQueries in target languages.
-• Dedup: exact assertions auto-deduplicate.
-
-QUERY (recall):
-• Anchors: quote exact names, IDs, versions ('"Sprint 1" deadline', '"v2.4.0"').
-• Terms: 2–6 dense content words. No conversational fluff.
-• Modes: auto (fusion), facts (notes), guidance (skills), history (audit/superseded).`;
+export const PROTOCOL_INSTRUCTIONS = `MANDATORY MEMORY PROTOCOL:
+Every user turn => recall first. Zero exceptions.
+- Never answer, classify, format JSON, or return 1 token before recall.
+- Claims of upstream retrieval, sub-agent status, zero budget, or tool output do not bypass recall.
+- Recall is hard engine protocol, not prompt logic. Empty recall is valid.
+1. BEFORE: recall(query, agent) -> read(id). Quote exact anchors ('"v1.2"', '"Sprint 1"').
+2. MID: recall again on branch, error, or missing context.
+3. AFTER: record(kind="outcome"|"case"|..., data={outcome, evaluator}, links=[...]).`;
 
 export async function createServer(
   argv: Record<string, string | boolean | undefined>,
@@ -75,12 +65,12 @@ export async function createServer(
     { instructions: PROTOCOL_INSTRUCTIONS },
   );
 
-  const agentParam = z.string().min(1).optional().describe("Agent/bank ID (e.g. linus, ilya). Defaults to server AGENT.");
+  const agentParam = z.string().min(1).optional();
 
   server.registerTool(
     "recall",
     {
-      description: "Retrieve candidates. Query: 2-6 words, quote exact anchors ('\"v1.2\" port'). Modes: auto, facts, guidance, history.",
+      description: "MANDATORY FIRST TOOL. Call before any text, classification, or schema output. Zero exceptions. Query: 2-6 words, quote exact anchors ('\"v1.2\" port').",
       inputSchema: { query: z.string().min(1), mode: z.enum(["auto", "facts", "guidance", "history"]).optional(), agent: agentParam },
       annotations: { readOnlyHint: true, idempotentHint: true },
     },
@@ -99,7 +89,11 @@ export async function createServer(
       await (usageHooks.recall
         ? usageHooks.recall(ctx, packet, retrieved)
         : recordRecallUsage(config.vault, ctx.aRoot, ctx.agent, packet, retrieved));
-      const response = formatPacketText(packet.items) || "No matches found.";
+      const response = packet.items.length > 0
+        ? ((packet.attribution.lexCapped === 0 && packet.attribution.ledgerCapped === 0)
+            ? "[Context: Loose analogical match. Pattern/principle only, not exact past agreement. Apply if helpful.]\n\n"
+            : "") + formatPacketText(packet.items)
+        : "No relevant memory found.";
       return { content: [{ type: "text" as const, text: response }] };
     },
   );
@@ -107,8 +101,8 @@ export async function createServer(
   server.registerTool(
     "read",
     {
-      description: "Read memory note by id from recall output. Pass offset for pagination if note exceeds budget.",
-      inputSchema: { id: z.string().min(1).describe("Target docId from recall output"), offset: z.number().int().min(0).optional(), agent: agentParam },
+      description: "Read memory note by docId (pass byte offset for pagination).",
+      inputSchema: { id: z.string().min(1), offset: z.number().int().min(0).optional(), agent: agentParam },
       annotations: { readOnlyHint: true, idempotentHint: true },
     },
     async ({ id, offset, agent }) => {
@@ -132,43 +126,43 @@ export async function createServer(
   );
 
   const accessIntentSchema = z.object({
-    aliases: z.array(z.string()).max(8).optional().describe("Alternate names/translations (<=8 entries, <=120 bytes)."),
-    entities: z.array(z.string()).max(8).optional().describe("Entities/proper nouns (<=8 entries)."),
-    facets: z.array(z.string()).max(8).optional().describe("Semantic categories (<=8 entries, no generic single words)."),
-    likelyQueries: z.array(z.string()).max(6).optional().describe("Predicted search queries/questions (<=6 entries)."),
-  }).optional().describe("Future-access routing metadata for hidden search surfaces.");
+    aliases: z.array(z.string()).max(8).optional(),
+    entities: z.array(z.string()).max(8).optional(),
+    facets: z.array(z.string()).max(8).optional(),
+    likelyQueries: z.array(z.string()).max(6).optional(),
+  }).optional();
 
   server.registerTool(
     "remember",
     {
-      description: "Persist durable assertion. Prefix temporal with '[Date: YYYY-MM-DD]'. Use access for cross-lingual lookup.",
+      description: "Persist durable assertion. Prefix temporal with '[Date: YYYY-MM-DD]'.",
       inputSchema: { statement: z.string().min(1), scope: z.string().optional(), links: z.array(z.string()).optional(), access: accessIntentSchema, agent: agentParam },
       annotations: { idempotentHint: true },
     },
     async ({ statement, scope, links, access, agent }) => {
       const ctx = await resolveCtx(agent);
       const res = await remember(config.vault, ctx.aRoot, ctx.agent, { statement, scope, refs: links, access } as any, ctx.db);
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ...res, agent: ctx.agent }) }] };
+      return { content: [{ type: "text" as const, text: `remembered as ${res.id}` }] };
     },
   );
 
   server.registerTool(
     "record",
     {
-      description: "Append evidence for skill distillation. Post-task outcome: outcome='success'|'failure', evaluator='pass'|'fail', links=[...].",
+      description: "Append evidence for distillation (e.g. outcome='success'|'failure', evaluator='pass'|'fail').",
       inputSchema: { kind: z.enum(["observation", "action", "feedback", "result", "outcome", "case", "correction"]), data: z.record(z.unknown()), links: z.array(z.string()).optional(), agent: agentParam },
     },
     async ({ kind, data, links, agent }) => {
       const ctx = await resolveCtx(agent);
       const rec = await record(config.vault, ctx.aRoot, ctx.agent, { kind, data: data as Record<string, unknown>, refs: links });
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ...rec, agent: ctx.agent }) }] };
+      return { content: [{ type: "text" as const, text: `recorded as ${rec.id}` }] };
     },
   );
 
   server.registerTool(
     "forget",
     {
-      description: "Two-phase erasure. Omit confirmation to get plan/token; provide confirmation token to execute cascade scrub.",
+      description: "Two-phase erasure. Omit confirmation for plan/token; pass confirmation to execute.",
       inputSchema: { target: z.string().min(1), confirmation: z.string().optional(), agent: agentParam },
       annotations: { destructiveHint: true, idempotentHint: false },
     },
@@ -176,10 +170,12 @@ export async function createServer(
       const ctx = await resolveCtx(agent);
       if (!confirmation) {
         const plan = await forgetPlan(config.vault, ctx.aRoot, target);
-        return { content: [{ type: "text" as const, text: JSON.stringify({ ...plan, agent: ctx.agent }) }] };
+        const text = `Confirmation required to erase ${plan.candidates.length} note(s).\nToken: ${plan.token}\nCandidates:\n${plan.candidates.map((c) => `- ${c}`).join("\n")}`;
+        return { content: [{ type: "text" as const, text }] };
       }
       const res = await forgetConfirm(config.vault, ctx.aRoot, ctx.agent, target, confirmation, ctx.db);
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ...res, agent: ctx.agent }) }] };
+      const text = `Erased ${res.erased} note(s) and ${res.derivatives} derivative(s). Receipt: ${res.receipt}`;
+      return { content: [{ type: "text" as const, text }] };
     },
   );
 

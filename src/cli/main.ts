@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { resolveConfig, agentRoot, vaultModelCache } from "@/core/config";
+import { resolveConfig, agentRoot, defaultModelCache } from "@/core/config";
 import { ensureVault } from "@/storage/vault";
 import { openIndex } from "@/storage/index/schema";
 import { syncVault, rebuild } from "@/storage/index/sync";
@@ -34,7 +34,7 @@ async function cmdDoctor(args: Record<string, string | boolean | undefined>) {
   checks.push({ name: "vault", path: config.vault, exists: existsSync(config.vault) });
   checks.push({ name: "agentRoot", path: aRoot, exists: existsSync(aRoot) });
   checks.push({ name: "index", path: path.join(aRoot, "index.sqlite"), exists: existsSync(path.join(aRoot, "index.sqlite")) });
-  const modelCache = vaultModelCache(config.vault);
+  const modelCache = defaultModelCache();
   checks.push({ name: "modelCache", path: modelCache, exists: existsSync(modelCache) });
   checks.push({ name: "q8 model", id: "Xenova/all-MiniLM-L6-v2 q8 751bff3", ready: existsSync(path.join(modelCache, "Xenova", "all-MiniLM-L6-v2")) });
   let vector: ReturnType<typeof vectorStatus> | undefined;
@@ -54,7 +54,7 @@ async function cmdSetup(args: Record<string, string | boolean | undefined>) {
   try {
     const { getEmbedder } = await import("@/storage/index/embedding");
     await getEmbedder(config.vault);
-    console.log(JSON.stringify({ ok: true, vault: config.vault, agent: config.agent, cache: vaultModelCache(config.vault) }));
+    console.log(JSON.stringify({ ok: true, vault: config.vault, agent: config.agent, cache: defaultModelCache() }));
   } catch (e: any) {
     console.log(JSON.stringify({ ok: true, vault: config.vault, agent: config.agent, note: "index ready; model will download on first recall" }));
   }

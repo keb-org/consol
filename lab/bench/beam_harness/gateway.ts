@@ -41,11 +41,11 @@ export type ChatResult = {
 };
 
 export function resolveGatewayConfig(): GatewayConfig {
-  const baseUrl = process.env.BEAM_GATEWAY_URL || "https://agent.auranion.com/v1";
-  const apiKey = process.env.BEAM_GATEWAY_KEY || process.env.AURANION_API_KEY || "";
-  if (!apiKey) throw new Error("missing gateway key: set BEAM_GATEWAY_KEY or AURANION_API_KEY");
-  const answerModel = process.env.BEAM_ANSWER_MODEL || "claude-haiku-4-6";
-  const judgeModel = process.env.BEAM_JUDGE_MODEL || answerModel;
+  const baseUrl = process.env.LLM_GATEWAY_URL || process.env.BEAM_GATEWAY_URL || "https://agent.auranion.com/v1";
+  const apiKey = process.env.LLM_GATEWAY_KEY || process.env.BEAM_GATEWAY_KEY || process.env.AURANION_API_KEY || "";
+  if (!apiKey) throw new Error("missing gateway key: set LLM_GATEWAY_KEY in .env");
+  const answerModel = process.env.LLM_ANSWER_MODEL || process.env.BEAM_ANSWER_MODEL || "claude-haiku-4-6";
+  const judgeModel = process.env.LLM_JUDGE_MODEL || process.env.BEAM_JUDGE_MODEL || answerModel;
   return { baseUrl, apiKey, answerModel, judgeModel };
 }
 
