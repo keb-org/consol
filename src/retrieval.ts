@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import type { Budgets } from "./config";
 import { RRF_K } from "./config";
-import { embedTexts, ftsSearch, vecSearch, vectorStatus } from "./index";
+import { embedTexts, ftsSearch, numericLedgerSearch, vecSearch, vectorStatus, type NumericLedgerSearchRow } from "./index";
 import { nearDuplicateStatement, parseSourceRefCount, transferBoost } from "./transfer";
 
 export type RecallMode = "auto" | "facts" | "guidance" | "history";
@@ -17,7 +17,7 @@ export type PacketItem = {
   status?: string;
   owner: string;
   rrf: number;
-  source: "exact" | "fused" | "link";
+  source: "exact" | "fused" | "ledger" | "link";
 };
 
 export type Packet = {
@@ -30,6 +30,7 @@ export type Packet = {
   attribution: {
     lexCapped: number;
     vecCapped: number;
+    ledgerCapped: number;
     fused: number;
     linked: number;
     returned: number;
@@ -73,7 +74,13 @@ type Scored = ChunkRow & {
   rrf: number;
   rankLex?: number;
   rankVec?: number;
+  rankLedger?: number;
+  ledger?: NumericLedgerSearchRow;
   source: PacketItem["source"];
+};
+
+export type RecallOptions = {
+  numericLedger?: boolean;
 };
 
 const ACTIVE_STATUSES = ["active", "candidate", "staging", ""];
@@ -147,6 +154,10 @@ function inferTarget(query: string): 10 | 20 | 30 {
   return 10;
 }
 
+function hasNumericIntent(query: string) {
+  return /\d|[$€£¥%]|\b(?:amount|capacity|count|date|deadline|duration|exact|how many|how much|latency|maximum|number|percent(?:age)?|port|price|qps|rate|score|target|total|ttl|value|version)\b/i.test(query);
+}
+
 export function packetCeilingBytes(budgets: Budgets) {
   return Math.min(budgets.packetTokens, budgets.packetCeiling) * 4;
 }
@@ -160,7 +171,9 @@ function toItem(row: Scored, packetId: string): PacketItem {
     ref: encodeRef(row.chunk_id, row.doc_id, row.hash, row.owner, packetId),
     docId: row.doc_id,
     kind: row.kind,
-    summary: summaryOf(row.text, row.section),
+    summary: row.ledger
+      ? `${row.ledger.value}${row.ledger.occurred_at ? ` (${row.ledger.occurred_at})` : ""}: ${row.ledger.statement}`.slice(0, 240)
+      : summaryOf(row.text, row.section),
     ...(row.section ? { section: row.section } : {}),
     ...(row.scope ? { scope: row.scope } : {}),
     ...(row.source_refs ? { source_refs: row.source_refs } : {}),
@@ -175,16 +188,24 @@ function rankRows(
   rows: ChunkRow[],
   lexRank: Map<number, number>,
   vecRank: Map<number, number>,
+  ledgerRank: Map<number, number>,
+  ledgerByChunk: Map<number, NumericLedgerSearchRow>,
 ): Scored[] {
   return rows.map((row) => {
     const lr = lexRank.get(row.chunk_id);
     const vr = vecRank.get(row.chunk_id);
+    const nr = ledgerRank.get(row.chunk_id);
     return {
       ...row,
-      rrf: (lr === undefined ? 0 : 1 / (RRF_K + lr + 1)) + (vr === undefined ? 0 : 1 / (RRF_K + vr + 1)),
+      rrf:
+        (lr === undefined ? 0 : 1 / (RRF_K + lr + 1)) +
+        (vr === undefined ? 0 : 1 / (RRF_K + vr + 1)) +
+        (nr === undefined ? 0 : 3 / (RRF_K + nr + 1)),
       rankLex: lr,
       rankVec: vr,
-      source: "fused" as const,
+      rankLedger: nr,
+      ledger: ledgerByChunk.get(row.chunk_id),
+      source: nr !== undefined ? "ledger" as const : "fused" as const,
     };
   }).sort((a, b) => b.rrf - a.rrf || a.doc_id.localeCompare(b.doc_id) || a.chunk_id - b.chunk_id);
 }
@@ -233,7 +254,7 @@ function dedupByStatement(items: PacketItem[]): PacketItem[] {
   const out: PacketItem[] = [];
   for (const item of items) {
     if (seenDoc.has(item.docId)) continue;
-    if (out.some((kept) => nearDuplicateStatement(kept.summary, item.summary) && kept.kind === item.kind)) continue;
+    if (item.source !== "ledger" && out.some((kept) => kept.source !== "ledger" && nearDuplicateStatement(kept.summary, item.summary) && kept.kind === item.kind)) continue;
     seenDoc.add(item.docId);
     out.push(item);
   }
@@ -285,6 +306,7 @@ export async function recall(
   ownerFilter?: string,
   mode: RecallMode = "auto",
   teamOwners: ReadonlySet<string> = new Set(),
+  options: RecallOptions = {},
 ): Promise<Packet> {
   const q = normalize(query);
   const id = `pkt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -307,6 +329,7 @@ export async function recall(
       attribution: {
         lexCapped: 0,
         vecCapped: 0,
+        ledgerCapped: 0,
         fused: 1,
         linked: 0,
         vector,
@@ -334,12 +357,22 @@ export async function recall(
     }
   }
   const vecRank = new Map(vecRows.map((row, index) => [row.chunk_id, index]));
-  const ids = [...new Set([...lexRank.keys(), ...vecRank.keys()])];
+
+  let ledgerRows: NumericLedgerSearchRow[] = [];
+  if (options.numericLedger !== false && hasNumericIntent(query)) {
+    const candidates = numericLedgerSearch(db, q, poolLimit);
+    const authorizedIds = new Set(fetchAuthorized(db, candidates.map((row) => row.chunk_id), mode, ownerFilter, teams).map((row) => row.chunk_id));
+    const seen = new Set<number>();
+    ledgerRows = candidates.filter((row) => authorizedIds.has(row.chunk_id) && !seen.has(row.chunk_id) && Boolean(seen.add(row.chunk_id))).slice(0, perArm);
+  }
+  const ledgerRank = new Map(ledgerRows.map((row, index) => [row.chunk_id, index]));
+  const ledgerByChunk = new Map(ledgerRows.map((row) => [row.chunk_id, row]));
+  const ids = [...new Set([...lexRank.keys(), ...vecRank.keys(), ...ledgerRank.keys()])];
   const authorized = fetchAuthorized(db, ids, mode, ownerFilter, teams);
-  const fused = rankRows(authorized, lexRank, vecRank);
+  const fused = rankRows(authorized, lexRank, vecRank, ledgerRank, ledgerByChunk);
   const expanded = oneHop(fused, db, mode, ownerFilter, teams);
   const rawCandidates = expanded.map((row) => toItem(row, id));
-  const retrieved = rawCandidates.slice(0, Math.max(lexRows.length, vecRows.length, targetCandidates));
+  const retrieved = rawCandidates.slice(0, Math.max(lexRows.length, vecRows.length, ledgerRows.length, targetCandidates));
   const deduped = dedupByStatement(rawCandidates);
   const boosted = boostReusable(deduped, lexRows.length, perArm);
   const candidates = (lexRows.length === 0 && boosted.length > 3)
@@ -355,6 +388,7 @@ export async function recall(
     attribution: {
       lexCapped: lexRows.length,
       vecCapped: vecRows.length,
+      ledgerCapped: ledgerRows.length,
       fused: fused.length,
       linked: expanded.filter((row) => row.source === "link").length,
       vector: { ...vector, reason: vectorReason },

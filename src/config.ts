@@ -78,5 +78,5 @@ export function teamRoot(vault: string, team: string) {
 
 // Fingerprint changes force SQLite index drop and rebuild without touching canonical files.
 export function indexFingerprint() {
-  return `${MODEL_ID}@${MODEL_REVISION}:${MODEL_DTYPE}:mean:l2:${EMBED_DIMS}:chunk-v3-sourcerefs`;
+  return `${MODEL_ID}@${MODEL_REVISION}:${MODEL_DTYPE}:mean:l2:${EMBED_DIMS}:chunk-v4-sourcerefs-numeric-ledger-v1`;
 }

@@ -8,6 +8,16 @@ vault/
 .vault/
 *-vault/
 .cache/
+bench/beam_harness/out/
 *.tmp*
 .lock
+
+# Local research, benchmarks, and experiments
+.research/
+bench/
+*.jsonl
+bench_honest_output.json
+src/graph.ts
+src/tokenizer.ts
+
 
