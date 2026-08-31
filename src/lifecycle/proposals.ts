@@ -3,7 +3,6 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { Database } from "bun:sqlite";
 import { hashContent, parseFrontmatter } from "@/storage/vault";
-import { decodeRef } from "@/retrieval/packet";
 import { containsSecret } from "@/core/security";
 import { abstractionLevel } from "@/retrieval/transfer";
 import type { EvidenceRecord } from "./evidence";
@@ -77,7 +76,7 @@ export function packetSourceRefs(job: { packet: { items?: any[]; evidence?: Evid
   const refs = new Set<string>();
   for (const record of job.packet.evidence ?? []) refs.add(record.id);
   for (const item of job.packet.items ?? []) {
-    if (typeof item?.ref === "string") refs.add(item.ref);
+    if (typeof item?.docId === "string") refs.add(item.docId);
   }
   return refs;
 }
@@ -94,24 +93,16 @@ export async function validatePacketItemRefs(
   const allowedOwners = new Set([`agent:${agent}`, ...await getAttachedTeams(vault, agent)]);
   const rejections: Rejection[] = [];
   for (const item of job.packet.items) {
-    if (typeof item?.ref !== "string") {
-      rejections.push({ reason: "packet item missing ref" });
+    if (typeof item?.docId !== "string") {
+      rejections.push({ reason: "packet item missing docId" });
       continue;
     }
-    try {
-      const decoded = decodeRef(item.ref);
-      const row = db.query("SELECT doc_id, hash, owner FROM chunks WHERE chunk_id=?").get(decoded.c) as {
-        doc_id: string;
-        hash: string;
-        owner: string;
-      } | null;
-      if (!row) rejections.push({ reason: `packet ref no longer exists: ${item.ref}` });
-      else if (row.doc_id !== decoded.d || !row.hash.startsWith(decoded.h)) rejections.push({ reason: `packet ref is stale or forged: ${item.ref}` });
-      else if (row.owner !== decoded.o) rejections.push({ reason: `packet ref owner mismatch: ${item.ref}` });
-      else if (!allowedOwners.has(row.owner)) rejections.push({ reason: `packet ref owner not attached: ${item.ref}` });
-    } catch {
-      rejections.push({ reason: `invalid packet ref: ${item.ref}` });
-    }
+    const row = db.query("SELECT doc_id, owner FROM chunks WHERE doc_id=?").get(item.docId) as {
+      doc_id: string;
+      owner: string;
+    } | null;
+    if (!row) rejections.push({ reason: `packet item no longer exists: ${item.docId}` });
+    else if (!allowedOwners.has(row.owner)) rejections.push({ reason: `packet item owner not attached: ${item.docId}` });
   }
   return rejections;
 }

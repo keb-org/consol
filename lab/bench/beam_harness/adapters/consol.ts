@@ -220,16 +220,17 @@ export function makeConsolAdapter(label = "consol-real", options: { numericLedge
     async recall(question: string, ctx): Promise<AdapterPacket> {
       const packet: any = await consolRecall(ctx.db, ctx.vaultRoot, question, budgets, owner(ctx), "auto", new Set(), options);
       return {
-        items: (packet.items || []).map((it: any) => ({ ref: it.ref, summary: String(it.summary || ""), section: it.section })),
+        items: (packet.items || []).map((it: any) => ({ ref: it.docId, summary: String(it.summary || ""), section: it.section })),
         attribution: packet.attribution,
         raw: { id: packet.id },
       };
     },
 
-    async readRef(ref: string, cursor, ctx, maxBytes): Promise<AdapterRead> {
+    async readRef(ref: string, cursor: string | undefined, ctx, maxBytes): Promise<AdapterRead> {
       try {
-        const chunk = readChunk(ctx.db, ref, { ...budgets, l2Bytes: maxBytes }, cursor);
-        return { text: chunk.text, docId: chunk.docId, section: chunk.section, done: chunk.done, cursor: chunk.cursor };
+        const offset = cursor ? parseInt(cursor, 10) : 0;
+        const chunk = readChunk(ctx.db, ref, { ...budgets, l2Bytes: maxBytes }, isNaN(offset) ? 0 : offset);
+        return { text: chunk.text, docId: chunk.docId, section: "", done: chunk.done, cursor: chunk.nextOffset !== undefined ? String(chunk.nextOffset) : undefined };
       } catch {
         return null; // stale ref etc. — agent loop treats as dead candidate
       }

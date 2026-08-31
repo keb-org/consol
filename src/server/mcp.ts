@@ -8,22 +8,22 @@ import { getAttachedTeams, sanitizeId } from "@/core/identity";
 import { ensureVault } from "@/storage/vault";
 import { openIndex } from "@/storage/index/schema";
 import { syncVault } from "@/storage/index/sync";
-import { decodeRef, getRetrievalUsage, recall, readChunk, type Packet, type RecallMode, type RetrievalUsageItem } from "@/retrieval";
+import { formatPacketText, getRetrievalUsage, recall, readChunk, type Packet, type RecallMode, type RetrievalUsageItem } from "@/retrieval";
 import { remember, record, recordConsultedUsage, recordRecallUsage, readNote } from "@/lifecycle/write";
 import { forgetPlan, forgetConfirm } from "@/storage/erasure";
 
 export type AgentCtx = { agent: string; aRoot: string; db: Database; teamOwners: Set<string>; syncWarning?: string };
 export type UsageHooks = {
   recall?: (ctx: AgentCtx, packet: Packet, retrieved: RetrievalUsageItem[]) => Promise<void>;
-  read?: (ctx: AgentCtx, input: { ref: string; docId: string; owner: string; offset: number; packetId?: string }) => Promise<void>;
+  read?: (ctx: AgentCtx, input: { docId: string; owner: string; offset: number }) => Promise<void>;
 };
 
 const PROTOCOL_INSTRUCTIONS = `MANDATORY MEMORY PROTOCOL — Continuous injection mandatory. Single-recall-then-never violates protocol.
 
 LOOP:
-1. BEFORE: recall(query, agent). Read every plausible ref.
+1. BEFORE: recall(query, agent). Read candidate notes with read(id).
 2. MID: recall again on branch, error, assumption fail, missing context.
-3. AFTER: record outcome='success'|'failure'|'partial', evaluator='pass'|'fail'|'mixed', appliedRefs=[...].
+3. AFTER: record outcome='success'|'failure'|'partial', evaluator='pass'|'fail'|'mixed', links=[...].
 4. Subagents MUST inherit protocol.
 
 WRITE (remember/record):
@@ -80,7 +80,7 @@ export async function createServer(
   server.registerTool(
     "recall",
     {
-      description: "MANDATORY — Retrieve candidates (<1k tokens). Query: 2-6 words, quote exact anchors ('\"v1.2\" port'). Modes: auto, facts, guidance, history. Repeat mid-task when context branches.",
+      description: "Retrieve candidates. Query: 2-6 words, quote exact anchors ('\"v1.2\" port'). Modes: auto, facts, guidance, history.",
       inputSchema: { query: z.string().min(1), mode: z.enum(["auto", "facts", "guidance", "history"]).optional(), agent: agentParam },
       annotations: { readOnlyHint: true, idempotentHint: true },
     },
@@ -99,11 +99,7 @@ export async function createServer(
       await (usageHooks.recall
         ? usageHooks.recall(ctx, packet, retrieved)
         : recordRecallUsage(config.vault, ctx.aRoot, ctx.agent, packet, retrieved));
-      const response = JSON.stringify({ ...packet, agent: ctx.agent, syncWarning: ctx.syncWarning });
-      const ceiling = Math.min(config.budgets.packetTokens, config.budgets.packetCeiling) * 4;
-      if (Buffer.byteLength(response, "utf8") > ceiling) {
-        throw new Error(`MCP recall response exceeds ${ceiling}-byte ceiling — category: out-of-bounds. Fix: lower perArmCap/targetCandidates or shorten summaries`);
-      }
+      const response = formatPacketText(packet.items) || "No matches found.";
       return { content: [{ type: "text" as const, text: response }] };
     },
   );
@@ -111,28 +107,27 @@ export async function createServer(
   server.registerTool(
     "read",
     {
-      description: "MANDATORY after recall. Read byte-bounded chunk from ref; pass cursor for next page. Read all plausible refs before decisions.",
-      inputSchema: { ref: z.string().min(1), cursor: z.string().optional(), agent: agentParam },
+      description: "Read memory note by id from recall output. Pass offset for pagination if note exceeds budget.",
+      inputSchema: { id: z.string().min(1).describe("Target docId from recall output"), offset: z.number().int().min(0).optional(), agent: agentParam },
       annotations: { readOnlyHint: true, idempotentHint: true },
     },
-    async ({ ref, cursor, agent }) => {
-      const decoded = decodeRef(ref);
-      const ownerAgent = decoded.o.startsWith("agent:") ? decoded.o.slice("agent:".length) : undefined;
-      const ctx = await resolveCtx(agent ?? ownerAgent);
+    async ({ id, offset, agent }) => {
+      const ctx = await resolveCtx(agent);
+      const chunk = readChunk(ctx.db, id, config.budgets, offset ?? 0);
       const allowedOwners = new Set([`agent:${ctx.agent}`, ...ctx.teamOwners]);
-      if (!allowedOwners.has(decoded.o)) throw new Error(`unauthorized ref owner: ${decoded.o} not in {agent:${ctx.agent}, ${[...ctx.teamOwners].join(", ")}} — category: unauthorized. Fix: call read with agent="${decoded.o.replace(/^(agent|team):/, "")}" or attach team`);
-      const chunk = readChunk(ctx.db, ref, config.budgets, cursor);
+      if (!allowedOwners.has(chunk.owner)) {
+        throw new Error(`unauthorized owner: ${chunk.owner} not in {agent:${ctx.agent}, ${[...ctx.teamOwners].join(", ")}} — category: unauthorized.`);
+      }
       const usage = {
-        ref,
         docId: chunk.docId,
         owner: chunk.owner,
         offset: chunk.offset,
-        packetId: decoded.p,
       };
       await (usageHooks.read
         ? usageHooks.read(ctx, usage)
         : recordConsultedUsage(config.vault, ctx.aRoot, ctx.agent, usage));
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ...chunk, agent: ctx.agent }) }] };
+      const output = `# ${chunk.docId} (${chunk.kind})\n\n${chunk.text}${chunk.nextOffset ? `\n\n[More available: call read(id="${chunk.docId}", offset=${chunk.nextOffset})]` : ""}`;
+      return { content: [{ type: "text" as const, text: output }] };
     },
   );
 
@@ -147,12 +142,12 @@ export async function createServer(
     "remember",
     {
       description: "Persist durable assertion. Prefix temporal with '[Date: YYYY-MM-DD]'. Use access for cross-lingual lookup.",
-      inputSchema: { statement: z.string().min(1), scope: z.string().optional(), refs: z.array(z.string()).optional(), access: accessIntentSchema, agent: agentParam },
+      inputSchema: { statement: z.string().min(1), scope: z.string().optional(), links: z.array(z.string()).optional(), access: accessIntentSchema, agent: agentParam },
       annotations: { idempotentHint: true },
     },
-    async ({ statement, scope, refs, access, agent }) => {
+    async ({ statement, scope, links, access, agent }) => {
       const ctx = await resolveCtx(agent);
-      const res = await remember(config.vault, ctx.aRoot, ctx.agent, { statement, scope, refs, access } as any, ctx.db);
+      const res = await remember(config.vault, ctx.aRoot, ctx.agent, { statement, scope, refs: links, access } as any, ctx.db);
       return { content: [{ type: "text" as const, text: JSON.stringify({ ...res, agent: ctx.agent }) }] };
     },
   );
@@ -160,12 +155,12 @@ export async function createServer(
   server.registerTool(
     "record",
     {
-      description: "MANDATORY — Append evidence for skill distillation. Post-task outcome: outcome='success'|'failure', evaluator='pass'|'fail', appliedRefs=[...].",
-      inputSchema: { kind: z.enum(["observation", "action", "feedback", "result", "outcome", "case", "correction"]), data: z.record(z.unknown()), refs: z.array(z.string()).optional(), agent: agentParam },
+      description: "Append evidence for skill distillation. Post-task outcome: outcome='success'|'failure', evaluator='pass'|'fail', links=[...].",
+      inputSchema: { kind: z.enum(["observation", "action", "feedback", "result", "outcome", "case", "correction"]), data: z.record(z.unknown()), links: z.array(z.string()).optional(), agent: agentParam },
     },
-    async ({ kind, data, refs, agent }) => {
+    async ({ kind, data, links, agent }) => {
       const ctx = await resolveCtx(agent);
-      const rec = await record(config.vault, ctx.aRoot, ctx.agent, { kind, data: data as Record<string, unknown>, refs });
+      const rec = await record(config.vault, ctx.aRoot, ctx.agent, { kind, data: data as Record<string, unknown>, refs: links });
       return { content: [{ type: "text" as const, text: JSON.stringify({ ...rec, agent: ctx.agent }) }] };
     },
   );

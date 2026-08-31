@@ -34,13 +34,13 @@ const RETRIEVAL_USAGE: unique symbol = Symbol("retrievalUsage");
 type PacketWithUsage = Packet & { [RETRIEVAL_USAGE]?: RetrievalUsageItem[] };
 
 function attachRetrievalUsage(packet: Packet, items: PacketItem[]): Packet {
-  const usage = items.map(({ ref, docId, kind, owner, source }) => ({ ref, docId, kind, owner, source }));
+  const usage = items.map(({ docId, kind, owner, source }) => ({ docId, kind, owner, source }));
   Object.defineProperty(packet, RETRIEVAL_USAGE, { value: usage });
   return packet;
 }
 
 export function getRetrievalUsage(packet: Packet): RetrievalUsageItem[] {
-  return (packet as PacketWithUsage)[RETRIEVAL_USAGE] ?? packet.items.map(({ ref, docId, kind, owner, source }) => ({ ref, docId, kind, owner, source }));
+  return (packet as PacketWithUsage)[RETRIEVAL_USAGE] ?? packet.items.map(({ docId, kind, owner, source }) => ({ docId, kind, owner, source }));
 }
 
 function normalize(q: string) {
@@ -99,13 +99,12 @@ export async function recall(
   const exactRows = db.query("SELECT chunk_id, doc_id, text, section, kind, scope, source_refs, status, hash, owner FROM chunks WHERE lower(doc_id)=? ORDER BY chunk_id").all(q) as ChunkRow[];
   const exact = exactRows.find((row) => rowAllowed(row, mode, ownerFilter, teams));
   if (exact) {
-    const item = toItem({ ...exact, rrf: 1, source: "exact" }, id);
+    const item = toItem({ ...exact, rrf: 1, source: "exact" });
     const packet = fitPacket({
       id,
       mode,
       targetCandidates,
       items: [item],
-      next: "Exact ID resolved. Read ref.",
       attribution: {
         lexCapped: 0,
         vecCapped: 0,
@@ -196,9 +195,9 @@ export async function recall(
   const hopExtra = expanded.filter((r) => !fused.some((f) => f.doc_id === r.doc_id));
   const hopAppended = [...fused, ...hopExtra];
   const evidenceSet = selectEvidenceSet(hopAppended, query, targetCandidates);
-  const rawCandidates = evidenceSet.map((row) => toItem(row, id));
+  const rawCandidates = evidenceSet.map((row) => toItem(row));
 
-  const retrievedPool = hopAppended.map((row) => toItem(row, id));
+  const retrievedPool = hopAppended.map((row) => toItem(row));
   const retrieved = retrievedPool.slice(0, Math.max(lexCollapsed.size, vecCollapsed.size, ledgerRows.length, targetCandidates, rawCandidates.length + 2));
   const chunkByDoc = new Map<string, ChunkRow>();
   for (const r of authorized) chunkByDoc.set(r.doc_id, r);
@@ -214,7 +213,6 @@ export async function recall(
     mode,
     targetCandidates,
     items: allocated,
-    next: "Read every plausible ref. Recall again mid-task on branch/error/missing context.",
     attribution: {
       lexCapped: lexRows.length,
       vecCapped: vecRows.length,

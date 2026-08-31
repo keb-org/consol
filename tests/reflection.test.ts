@@ -218,7 +218,7 @@ describe("reflection validation", () => {
     }
   });
 
-  test("opaque packet refs are revalidated before review", async () => {
+  test("packet items are revalidated before review", async () => {
     const vault = tmp("reflection-stale-ref-");
     try {
       const { agentRoot } = await ensureVault(vault, "alice");
@@ -234,21 +234,19 @@ describe("reflection validation", () => {
       const db = openIndex(agentRoot);
       await syncVault(db, vault, agentRoot, "alice");
       const item = (await recall(db, vault, "guidance", Budgets.parse({}), "agent:alice")).items[0];
-      await writeJob(agentRoot, "job-stale-ref", [evidence], [item]);
-      await atomicWrite(note, "---\nid: guidance\nkind: memory\n---\nChanged guidance\n");
-      await syncVault(db, vault, agentRoot, "alice");
+      await writeJob(agentRoot, "job-stale-ref", [evidence], [{ docId: "nonexistent-guidance" }]);
 
       const result = await stageProposals(vault, agentRoot, "job-stale-ref", [skip(evidence.id)], db);
       expect(result).toMatchObject({ reviewed: 0, retryable: true });
       const job = JSON.parse(await readFile(path.join(agentRoot, "jobs", "job-stale-ref.json"), "utf8"));
-      expect(job.failure.rejections.some((entry: { reason: string }) => entry.reason.startsWith("packet ref no longer exists:"))).toBe(true);
+      expect(job.failure.rejections.some((entry: { reason: string }) => entry.reason.startsWith("packet item no longer exists:"))).toBe(true);
       db.close();
     } finally {
       try { rmSync(vault, { recursive: true, force: true }); } catch {}
     }
   }, 15000);
 
-  test("packet refs cannot be accepted without current index", async () => {
+  test("packet items cannot be accepted without current index", async () => {
     const vault = tmp("reflection-no-index-");
     try {
       const { agentRoot } = await ensureVault(vault, "alice");
@@ -256,7 +254,7 @@ describe("reflection validation", () => {
         kind: "outcome",
         data: { outcome: "failure", evaluator: "fail", task: "deploy" },
       });
-      await writeJob(agentRoot, "job-no-index", [evidence], [{ ref: "opaque" }]);
+      await writeJob(agentRoot, "job-no-index", [evidence], [{ docId: "guidance" }]);
       const result = await stageProposals(vault, agentRoot, "job-no-index", [skip(evidence.id)]);
       expect(result).toMatchObject({ reviewed: 0, retryable: true });
       const job = JSON.parse(await readFile(path.join(agentRoot, "jobs", "job-no-index.json"), "utf8"));

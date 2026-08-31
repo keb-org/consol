@@ -54,23 +54,24 @@ describe("MCP protocol", () => {
       expect(client.getInstructions()).toContain("MANDATORY MEMORY PROTOCOL");
       expect(client.getInstructions()).toContain("recall");
 
-      const recalled = textResult(await client.callTool({
+      const recalledRes = await client.callTool({
         name: "recall",
         arguments: { query: "deploy-rule", agent: "alice" },
-      }));
-      expect(recalled.items[0].docId).toBe("deploy-rule");
+      }) as { content: Array<{ type: string; text: string }> };
+      const recalledRaw = recalledRes.content[0].text;
+      expect(recalledRaw).toContain("[deploy-rule] memory");
+      expect(recalledRaw).toContain("staged health checks");
       expect(usage.recall).toHaveLength(1);
       expect(usage.recall[0].retrieved[0].docId).toBe("deploy-rule");
 
-      const decoded = JSON.parse(Buffer.from(recalled.items[0].ref, "base64url").toString("utf8"));
-      expect(decoded.p).toBe(recalled.id);
-      const read = textResult(await client.callTool({
+      const readRes = await client.callTool({
         name: "read",
-        arguments: { ref: recalled.items[0].ref, agent: "alice" },
-      }));
-      expect(read.text).toContain("staged health checks");
+        arguments: { id: "deploy-rule", agent: "alice" },
+      }) as { content: Array<{ type: string; text: string }> };
+      const readRaw = readRes.content[0].text;
+      expect(readRaw).toContain("staged health checks");
       expect(usage.read).toHaveLength(1);
-      expect(usage.read[0].packetId).toBe(recalled.id);
+      expect(usage.read[0].docId).toBe("deploy-rule");
     } finally {
       await client?.close().catch(() => {});
       await created?.server.close().catch(() => {});
