@@ -31,12 +31,10 @@ function batchTimeAnchor(batch: any) {
 function* iterBatches(chatJson: any): Generator<{ batch: any; timeAnchor?: string }> {
   if (!Array.isArray(chatJson)) return;
   for (const entry of chatJson) {
-    // 1M shape: { batch_number, time_anchor?, turns: [[msg,msg],...] }
     if (Array.isArray(entry?.turns)) {
       yield { batch: entry, timeAnchor: batchTimeAnchor(entry) };
       continue;
     }
-    // 10M shape: { "plan-N": [ {batch_number, time_anchor?, turns: [[msg,msg],...]} ] }
     for (const batches of Object.values(entry ?? {})) {
       if (!Array.isArray(batches)) continue;
       for (const batch of batches) {
