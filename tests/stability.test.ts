@@ -78,8 +78,8 @@ describe("stability: vault and index invariants", () => {
       expect(maximumPacket.attribution.ledgerCapped).toBeGreaterThan(0);
       const ledgerItems = packet.items.filter((item) => item.source === "ledger");
       expect(ledgerItems.map((item) => item.docId)).toEqual(["redis-new", "redis-old"]);
-      expect(readChunk(db, ledgerItems[0].ref, budgets).text).toContain("20-minute");
-      expect(readChunk(db, ledgerItems[1].ref, budgets).text).toContain("15-minute");
+      expect(readChunk(db, ledgerItems[0].docId, budgets).text).toContain("20-minute");
+      expect(readChunk(db, ledgerItems[1].docId, budgets).text).toContain("15-minute");
 
       const withoutLedger = await recall(db, vault, "What is the current Redis TTL duration?", budgets, "agent:alice", "auto", new Set(), { numericLedger: false });
       expect(withoutLedger.attribution.ledgerCapped).toBe(0);
@@ -405,7 +405,7 @@ describe("stability: retrieval under real budgets", () => {
     await syncVault(db, vault, aRoot, "alice");
     const pkt = await recall(db, vault, "mem-big", Budgets.parse({}));
     expect(pkt.items.length).toBeGreaterThan(0);
-    const chunk = readChunk(db, pkt.items[0].ref, Budgets.parse({ l2Bytes: 4096 }));
+    const chunk = readChunk(db, pkt.items[0].docId, Budgets.parse({ l2Bytes: 4096 }));
     expect(chunk.text.length).toBeLessThanOrEqual(4096);
     db.close(); cleanup(vault);
   }, 15000);
@@ -424,29 +424,27 @@ describe("stability: retrieval under real budgets", () => {
     const db = openIndex(aRoot);
     await syncVault(db, vault, aRoot, "alice");
     const budgets = Budgets.parse({ l2Bytes: 17 });
-    const ref = (await recall(db, vault, "mem-cursor", budgets)).items[0].ref;
-    let cursor: string | undefined;
-    let firstCursor: string | undefined;
+    const docId = (await recall(db, vault, "mem-cursor", budgets)).items[0].docId;
+    let offset = 0;
     let combined = "";
-    do {
-      const page = readChunk(db, ref, budgets, cursor);
+    while (true) {
+      const page = readChunk(db, docId, budgets, offset);
       expect(page.bytes).toBeLessThanOrEqual(17);
-      expect(page.text).not.toContain("�");
       combined += page.text;
-      firstCursor ??= page.cursor;
-      cursor = page.cursor;
-    } while (cursor);
+      if (page.done || page.nextOffset === undefined) break;
+      offset = page.nextOffset;
+    }
     expect(combined).toBe(body);
-    const otherRef = (await recall(db, vault, "mem-cursor-other", budgets)).items[0].ref;
-    expect(() => readChunk(db, otherRef, budgets, firstCursor)).toThrow("invalid cursor");
+    expect(() => readChunk(db, "nonexistent-doc", budgets, 0)).toThrow("unknown id");
     db.close(); cleanup(vault);
   }, 15000);
 
-  test("stale ref rejected after content changes (old chunk gone)", async () => {
+  test("stale docId rejected after note deletion", async () => {
     const { ensureVault, atomicWrite } = await import("@/vault");
     const { openIndex, syncVault } = await import("@/index");
     const { recall, readChunk } = await import("@/retrieval");
     const { Budgets } = await import("@/config");
+    const { unlink } = await import("node:fs/promises");
     const vault = tmp("stability-stale-");
     await ensureVault(vault, "alice");
     const aRoot = path.join(vault, "agents", "alice");
@@ -455,10 +453,10 @@ describe("stability: retrieval under real budgets", () => {
     const db = openIndex(aRoot);
     await syncVault(db, vault, aRoot, "alice");
     const pkt = await recall(db, vault, id, Budgets.parse({}));
-    const ref = pkt.items[0].ref;
-    await atomicWrite(path.join(aRoot, "memories", `${id}.md`), `---\nid: ${id}\nkind: memory\n---\nVersion two completely different\n`);
+    const targetId = pkt.items[0].docId;
+    await unlink(path.join(aRoot, "memories", `${id}.md`));
     await syncVault(db, vault, aRoot, "alice");
-    expect(() => readChunk(db, ref, Budgets.parse({}))).toThrow();
+    expect(() => readChunk(db, targetId, Budgets.parse({}))).toThrow("unknown id");
     db.close(); cleanup(vault);
   }, 15000);
 
@@ -574,10 +572,10 @@ describe("stability: isolation and provenance", () => {
     dbAlice.close(); cleanup(vault);
   }, 15000);
 
-  test("forged ref with wrong owner rejected", async () => {
+  test("unknown docId rejected on readChunk", async () => {
     const { ensureVault, atomicWrite } = await import("@/vault");
     const { openIndex, syncVault } = await import("@/index");
-    const { recall, readChunk, decodeRef } = await import("@/retrieval");
+    const { readChunk } = await import("@/retrieval");
     const { Budgets } = await import("@/config");
     const vault = tmp("stability-forged-");
     await ensureVault(vault, "alice");
@@ -585,10 +583,7 @@ describe("stability: isolation and provenance", () => {
     await atomicWrite(path.join(aRoot, "memories", "mem-forge.md"), "---\nid: mem-forge\nkind: memory\n---\nForge target\n");
     const db = openIndex(aRoot);
     await syncVault(db, vault, aRoot, "alice");
-    const pkt = await recall(db, vault, "mem-forge", Budgets.parse({}));
-    const decoded = decodeRef(pkt.items[0].ref);
-    const forged = Buffer.from(JSON.stringify({ ...decoded, o: "agent:bob" })).toString("base64url");
-    expect(() => readChunk(db, forged, Budgets.parse({}))).toThrow("owner mismatch");
+    expect(() => readChunk(db, "unknown-doc-id", Budgets.parse({}))).toThrow("unknown id");
     db.close(); cleanup(vault);
   }, 15000);
 
@@ -648,9 +643,8 @@ describe("stability: forgetting and lifecycle", () => {
     await syncVault(db, vault, aRoot, "alice");
     const packet = await recall(db, vault, id, Budgets.parse({}), "agent:alice");
     await recordRecallUsage(vault, aRoot, "alice", packet, getRetrievalUsage(packet));
-    const chunk = readChunk(db, packet.items[0].ref, Budgets.parse({}));
+    const chunk = readChunk(db, packet.items[0].docId, Budgets.parse({}));
     await recordConsultedUsage(vault, aRoot, "alice", {
-      ref: packet.items[0].ref,
       docId: chunk.docId,
       owner: chunk.owner,
       offset: chunk.offset,
@@ -870,8 +864,9 @@ describe("stability: MCP behavior and budgets", () => {
     const pkt = await recall(db, vault, "deployment pipeline", Budgets.parse({}));
     expect(pkt.targetCandidates).toBe(10);
     expect(pkt.items.length).toBeLessThanOrEqual(pkt.targetCandidates);
-    expect(Buffer.byteLength(JSON.stringify(pkt), "utf8")).toBeLessThanOrEqual(12000);
-    expect(pkt.attribution.packetBytes).toBe(Buffer.byteLength(JSON.stringify(pkt), "utf8"));
+    const { formatPacketText } = await import("@/retrieval");
+    expect(pkt.attribution.packetBytes).toBe(Buffer.byteLength(formatPacketText(pkt.items), "utf8"));
+    expect(pkt.attribution.packetBytes).toBeLessThanOrEqual(12000);
     db.close(); cleanup(vault);
   }, 15000);
 

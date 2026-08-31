@@ -55,26 +55,53 @@ export function rankRows(
   }).sort((a, b) => b.rrf - a.rrf || a.doc_id.localeCompare(b.doc_id) || a.chunk_id - b.chunk_id);
 }
 
-export function oneHop(
+export function multiHop(
   seeds: Scored[],
   db: Database,
   mode: RecallMode,
   ownerFilter?: string,
   teamOwners = new Set<string>(),
+  maxHops = 2,
 ): Scored[] {
   const bestByDoc = new Map<string, Scored>();
   for (const seed of seeds) if (!bestByDoc.has(seed.doc_id)) bestByDoc.set(seed.doc_id, seed);
-  const expansion = new Map<string, number>();
+
+  // BFS graph traversal up to maxHops with monotonic decay (0.5 per hop)
+  let currentFrontier = new Map<string, number>();
   for (const seed of [...bestByDoc.values()].slice(0, 8)) {
-    const links = db.query("SELECT dst FROM links WHERE src=? UNION SELECT src AS dst FROM links WHERE dst=? ORDER BY dst LIMIT 8").all(seed.doc_id, seed.doc_id) as { dst: string }[];
-    for (const { dst } of links) {
-      if (bestByDoc.has(dst)) continue;
-      const inherited = seed.rrf / 2;
-      expansion.set(dst, Math.max(expansion.get(dst) ?? 0, inherited));
-    }
+    currentFrontier.set(seed.doc_id, seed.rrf);
   }
-  for (const [docId, score] of [...expansion.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 12)) {
-    const row = db.query("SELECT chunk_id, doc_id, text, section, kind, scope, source_refs, status, hash, owner FROM chunks WHERE doc_id=? ORDER BY chunk_id LIMIT 1").get(docId) as ChunkRow | null;
+
+  const visited = new Set<string>(bestByDoc.keys());
+  const expansion = new Map<string, number>();
+
+  for (let hop = 1; hop <= maxHops; hop++) {
+    const nextFrontier = new Map<string, number>();
+    for (const [docId, score] of currentFrontier.entries()) {
+      const links = db.query(
+        "SELECT dst FROM links WHERE src=? UNION SELECT src AS dst FROM links WHERE dst=? ORDER BY dst LIMIT 8",
+      ).all(docId, docId) as { dst: string }[];
+
+      for (const { dst } of links) {
+        if (visited.has(dst)) continue;
+        const inherited = score / 2;
+        const prev = nextFrontier.get(dst) ?? 0;
+        if (inherited > prev) nextFrontier.set(dst, inherited);
+      }
+    }
+
+    for (const [docId, score] of nextFrontier.entries()) {
+      visited.add(docId);
+      expansion.set(docId, Math.max(expansion.get(docId) ?? 0, score));
+    }
+    currentFrontier = nextFrontier;
+    if (currentFrontier.size === 0) break;
+  }
+
+  for (const [docId, score] of [...expansion.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 16)) {
+    const row = db.query(
+      "SELECT chunk_id, doc_id, text, section, kind, scope, source_refs, status, hash, owner FROM chunks WHERE doc_id=? ORDER BY chunk_id LIMIT 1",
+    ).get(docId) as ChunkRow | null;
     if (!row || !rowAllowed(row, mode, ownerFilter, teamOwners)) continue;
     bestByDoc.set(docId, { ...row, rrf: score, source: "link" });
   }

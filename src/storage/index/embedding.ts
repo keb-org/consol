@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { EMBED_DIMS, MODEL_DTYPE, MODEL_ID, MODEL_REVISION, vaultModelCache } from "@/core/config";
+import { EMBED_DIMS, MODEL_DTYPE, MODEL_ID, MODEL_REVISION, defaultModelCache } from "@/core/config";
 import { metaValue, setMeta, deleteMeta, vectorTableAvailable, vectorCount } from "./schema";
 
 let embedder: any = null;
@@ -38,10 +38,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
   ]).finally(() => { if (timer) clearTimeout(timer); });
 }
 
-export async function getEmbedder(vault: string) {
+export async function getEmbedder(_vault?: string) {
   if (embedder) return embedder;
   if (embedderLoading) return embedderLoading;
-  const cache = vaultModelCache(vault);
+  const cache = defaultModelCache();
   const cachedModel = path.join(cache, "Xenova", "all-MiniLM-L6-v2");
   embedderLoading = (async () => {
     try {

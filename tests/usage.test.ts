@@ -40,9 +40,8 @@ describe("usage attribution", () => {
       expect(retrieved.length).toBeGreaterThan(packet.items.length);
 
       await recordRecallUsage(vault, agentRoot, "alice", packet, retrieved);
-      const first = readChunk(db, packet.items[0].ref, budgets);
+      const first = readChunk(db, packet.items[0].docId, budgets);
       await recordConsultedUsage(vault, agentRoot, "alice", {
-        ref: packet.items[0].ref,
         docId: first.docId,
         owner: first.owner,
         offset: first.offset,

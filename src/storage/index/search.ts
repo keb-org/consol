@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { MAX_VECTOR_DISTANCE } from "@/core/config";
 import {
   boundedContentTerms,
   buildFtsAnd,
@@ -174,21 +175,23 @@ export function numericLedgerSearch(db: Database, query: string, limit: number):
     .map(({ row: { rank, ...row } }) => row);
 }
 
-export function vecSearch(db: Database, embedding: number[], limit: number) {
+export function vecSearch(db: Database, embedding: number[], limit: number, maxDistance = MAX_VECTOR_DISTANCE) {
   try {
-    return db.query(`SELECT chunk_id, distance FROM chunk_vectors WHERE embedding MATCH ? AND k=? ORDER BY distance`).all(JSON.stringify(embedding), limit) as { chunk_id: number; distance: number }[];
+    const rows = db.query(`SELECT chunk_id, distance FROM chunk_vectors WHERE embedding MATCH ? AND k=? ORDER BY distance`).all(JSON.stringify(embedding), limit) as { chunk_id: number; distance: number }[];
+    return rows.filter((r) => r.distance <= maxDistance);
   } catch { return []; }
 }
 
-export function surfaceVecSearch(db: Database, embedding: number[], limit: number): { chunk_id: number; surface_id: number; distance: number }[] {
+export function surfaceVecSearch(db: Database, embedding: number[], limit: number, maxDistance = MAX_VECTOR_DISTANCE): { chunk_id: number; surface_id: number; distance: number }[] {
   if (!surfaceVectorAvailable(db) || !surfaceTableAvailable(db)) return [];
   try {
     const rows = db.query(`SELECT surface_id, distance FROM retrieval_surface_vectors WHERE embedding MATCH ? AND k=? ORDER BY distance`).all(JSON.stringify(embedding), limit * 3) as { surface_id: number; distance: number }[];
-    if (!rows.length) return [];
-    const ids = rows.map((r) => r.surface_id);
+    const validRows = rows.filter((r) => r.distance <= maxDistance);
+    if (!validRows.length) return [];
+    const ids = validRows.map((r) => r.surface_id);
     const placeholders = ids.map(() => "?").join(",");
     const chunkMap = db.query(`SELECT surface_id, chunk_id FROM retrieval_surfaces WHERE surface_id IN (${placeholders})`).all(...ids) as { surface_id: number; chunk_id: number }[];
     const byId = new Map(chunkMap.map((r) => [r.surface_id, r.chunk_id]));
-    return rows.flatMap((r) => { const cid = byId.get(r.surface_id); return cid !== undefined ? [{ chunk_id: cid, surface_id: r.surface_id, distance: r.distance }] : []; }).slice(0, limit);
+    return validRows.flatMap((r) => { const cid = byId.get(r.surface_id); return cid !== undefined ? [{ chunk_id: cid, surface_id: r.surface_id, distance: r.distance }] : []; }).slice(0, limit);
   } catch { return []; }
 }

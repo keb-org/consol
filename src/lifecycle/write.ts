@@ -27,7 +27,6 @@ export type UsageRecord = {
   packetId?: string;
   mode?: string;
   items?: RetrievalUsageItem[];
-  ref?: string;
   docId?: string;
   owner?: string;
   offset?: number;
@@ -238,7 +237,7 @@ function usagePath(agentRoot: string) {
 }
 
 function usageItems(items: RetrievalUsageItem[]) {
-  return items.map(({ ref, docId, kind, owner, source }) => ({ ref, docId, kind, owner, source }));
+  return items.map(({ docId, kind, owner, source }) => ({ docId, kind, owner, source }));
 }
 
 export async function recordRecallUsage(
@@ -282,7 +281,7 @@ export async function recordConsultedUsage(
   vault: string,
   agentRoot: string,
   agent: string,
-  input: { ref: string; docId: string; owner: string; offset: number; packetId?: string },
+  input: { docId: string; owner: string; offset: number; packetId?: string },
 ) {
   const recordItem: UsageRecord = {
     id: stableId("use-"),
@@ -290,7 +289,6 @@ export async function recordConsultedUsage(
     agent,
     kind: "usage",
     stage: "consulted",
-    ref: input.ref,
     docId: input.docId,
     owner: input.owner,
     offset: input.offset,

@@ -9,6 +9,9 @@ export const MODEL_DTYPE = "q8" as const;
 export const EMBED_DIMS = 384 as const;
 // RRF constant k=60 prevents high-ranked items from dominating fused score disproportionately.
 export const RRF_K = 60 as const;
+// Maximum cosine distance for vector matches (1 - cosSim). 0.75 corresponds to cosSim >= 0.25,
+// preserving cross-domain knowledge transfer while gating out pure random noise.
+export const MAX_VECTOR_DISTANCE = 0.75 as const;
 
 export const Budgets = z.object({
   coreTokens: z.number().int().positive().default(900),
@@ -63,8 +66,18 @@ export function resolveConfig(argv: Record<string, string | boolean | undefined>
   return VaultConfig.parse(raw);
 }
 
-export function vaultModelCache(vault: string) {
-  return path.join(vault, "models");
+export function defaultModelCache(): string {
+  if (process.env.CONSOL_CACHE_DIR) return path.resolve(process.env.CONSOL_CACHE_DIR);
+  if (process.platform === "win32") {
+    const local = process.env.LOCALAPPDATA;
+    if (local) return path.join(local, "consol", "models");
+  } else if (process.platform === "darwin") {
+    return path.join(os.homedir(), "Library", "Caches", "consol", "models");
+  } else {
+    const xdg = process.env.XDG_CACHE_HOME;
+    if (xdg) return path.join(xdg, "consol", "models");
+  }
+  return path.join(os.homedir(), ".cache", "consol", "models");
 }
 
 export function agentRoot(vault: string, agent: string) {

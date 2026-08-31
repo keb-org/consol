@@ -1,13 +1,6 @@
 import { describe, test, expect } from "bun:test";
 
 describe("isolation", () => {
-  test("opaque ref binds owner and hash", async () => {
-    const { decodeRef } = await import("@/retrieval");
-    const ref = Buffer.from(JSON.stringify({ c: 1, d: "doc", h: "abc123", o: "agent:alice" })).toString("base64url");
-    const decoded = decodeRef(ref);
-    expect(decoded.o).toBe("agent:alice");
-    expect(decoded.h).toBe("abc123");
-  });
   test("cross-bank path traversal rejected", () => {
     const path = require("node:path");
     const agentRoot = path.resolve("/tmp/vault/agents/alice");
