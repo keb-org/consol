@@ -96,7 +96,7 @@ async function cmdReflect(args: Record<string, string | boolean | undefined>) {
 
 async function cmdRollback(args: Record<string, string | boolean | undefined>) {
   const revision = typeof args.revision === "string" ? args.revision : "";
-  if (!revision) throw new Error("--revision required — category: type error (rollback needs --revision <revisionId>). Fix: pass --revision <id> from audit revisions (e.g. --revision rev-xxxxx)");
+  if (!revision) throw new Error("--revision required — category: type error. Fix: pass --revision <id>");
   const config = resolveConfig(args);
   const { agentRoot: aRoot } = await ensureVault(config.vault, config.agent);
   const db = openIndex(aRoot);

@@ -119,7 +119,7 @@ export async function stageProposals(
   execution: ReflectionExecution = {},
 ) {
   const jobPath = path.join(agentRoot, "jobs", `${jobId}.json`);
-  if (!existsSync(jobPath)) throw new Error(`reflection job not found: ${jobId} — category: stale or type error (no jobs/${jobId}.json for this agent). Fix: verify jobId spelling and that the job was created for this agent; list ${path.join(agentRoot, "jobs")} to find valid ids`);
+  if (!existsSync(jobPath)) throw new Error(`reflection job not found: ${jobId} — category: stale. Fix: verify jobId in ${path.join(agentRoot, "jobs")}`);
   const job = JSON.parse(await readFile(jobPath, "utf8")) as Job;
   job.proposals = proposals;
   job.runner = execution.runner;

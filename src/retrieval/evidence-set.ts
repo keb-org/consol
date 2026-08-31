@@ -5,10 +5,10 @@ import type { ChunkRow, PacketItem, Scored } from "./packet";
 export function stateSignature(row: ChunkRow): string {
   const text = row.text;
   const candidates: string[] = [];
-  const dateRe = /\b(?:\d{4}-\d{2}-\d{2}|(?:January|February|March|April|May|June|July|August|September|October|November|December)[ -]\d{1,2}(?:st|nd|rd|th)?(?:,|[ -])\s*\d{4})\b/gi;
+  const dateRe = /\b(?:\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{4}年\d{1,2}月\d{1,2}日|(?:January|February|March|April|May|June|July|August|September|October|November|December)[ -]\d{1,2}(?:,|[ -])\s*\d{4})\b/giu;
   const verRe = /\bv(?:ersion)?\s*\d+(?:\.\d+){1,3}\b/gi;
   const pctRe = /\b\d[\d,]*(?:\.\d+)?\s*%/g;
-  const moneyRe = /(?:[$€£¥]\s*\d[\d,]*(?:\.\d+)?|\b\d[\d,]*(?:\.\d+)?\s*(?:USD|EUR|GBP|JPY)\b)/gi;
+  const moneyRe = /(?:[$€£¥₫₩₽฿₪₴₦₵]\s*\d[\d,]*(?:\.\d+)?|\b\d[\d,]*(?:\.\d+)?\s*(?:USD|EUR|GBP|JPY|VND|CNY|KRW|AUD|CAD|CHF|BTC|ETH)\b)/giu;
   for (const re of [dateRe, verRe, pctRe, moneyRe]) {
     let m: RegExpExecArray | null;
     while ((m = re.exec(text))) candidates.push(m[0].toLowerCase());
@@ -56,8 +56,8 @@ export function selectEvidenceSet(
   target: 10 | 20 | 30,
 ): Scored[] {
   const anchors = extractTypedAnchors(query, 6);
-  const temporalIntent = /\b(previous|prior|before|change|update|adjust|between|order|compare|versus|vs\.?|history|earlier|latest|current)\b/i.test(query);
-  const numericIntent = /\b(current|latest|previous|prior|date|deadline|version|value|amount|price|score|total|target)\b/i.test(query);
+  // Pure structural signals: digits, currencies, versions, quotes
+  const hasDigitSignal = /\d|[$€£¥₫₩₽฿₪₴₦₵%]|\bv\d/i.test(query);
   const anchorFiltered = anchors.length ? fused.filter((r) => rowSatisfiesAnchors(r as unknown as ChunkRow, anchors)) : fused;
   const pool = anchorFiltered.length ? anchorFiltered : fused;
 
@@ -65,11 +65,11 @@ export function selectEvidenceSet(
   for (const r of pool) if (!byChunk.has(r.chunk_id)) byChunk.set(r.chunk_id, r);
 
   let reserved: Scored[] = [];
-  if ((temporalIntent || numericIntent) && anchors.length) {
+  if (hasDigitSignal && anchors.length) {
     const candidates = [...byChunk.values()].sort((a, b) => (b.updated ?? "").localeCompare(a.updated ?? "") || b.rrf - a.rrf);
     const latest = candidates[0];
     if (latest) reserved.push(latest);
-    if (temporalIntent && candidates.length > 1) {
+    if (candidates.length > 1) {
       const sigLatest = stateSignature(latest as unknown as ChunkRow);
       const prior = candidates.find((c) => stateSignature(c as unknown as ChunkRow) !== sigLatest);
       if (prior) reserved.push(prior);

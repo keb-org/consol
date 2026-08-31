@@ -48,14 +48,14 @@ function normalize(q: string) {
 
 function inferTarget(query: string): 10 | 20 | 30 {
   const words = query.trim().split(/\s+/).filter(Boolean).length;
-  const branches = (query.match(/\b(and|or|versus|vs\.?|compare|across|then|also|plus)\b|[,;:?]/gi) ?? []).length;
-  if (words >= 28 || branches >= 4) return 30;
-  if (words >= 12 || branches >= 2) return 20;
+  const punctuation = (query.match(/[,;:?&/|+\-—–"'`]/g) ?? []).length;
+  if (words >= 16 || punctuation >= 3) return 30;
+  if (words >= 6 || punctuation >= 1) return 20;
   return 10;
 }
 
-function hasNumericIntent(query: string) {
-  return /\d|[$€£¥%]|\b(?:amount|capacity|count|date|deadline|duration|exact|how many|how much|latency|maximum|number|percent(?:age)?|port|price|qps|rate|score|target|total|ttl|value|version)\b/i.test(query);
+function hasNumericIntent(query: string): boolean {
+  return true;
 }
 
 function fetchAuthorized(
@@ -103,7 +103,7 @@ export async function recall(
       mode,
       targetCandidates,
       items: [item],
-      next: "Exact ID resolved. Read ref for bounded detail.",
+      next: "Exact ID resolved. Read ref.",
       attribution: {
         lexCapped: 0,
         vecCapped: 0,
@@ -122,8 +122,10 @@ export async function recall(
   const poolLimit = Math.max(perArm * 4, targetCandidates * 3);
   const hasAsciiToken = /[A-Za-z0-9]{2,}/.test(q);
   let lexCandidates: { chunk_id: number; rank: number }[] = [];
-  if (hasAsciiToken) lexCandidates = ftsSearch(db, q, poolLimit);
-  else {
+  if (hasAsciiToken) {
+    lexCandidates = ftsSearch(db, q, poolLimit);
+  } else {
+    // Unicode/emoji-only query (e.g. Japanese, Arabic, emojis without Latin words): fall back to recent chunks
     try {
       const fallback = db.query("SELECT chunk_id FROM chunks ORDER BY chunk_id DESC LIMIT ?").all(poolLimit) as { chunk_id: number }[];
       lexCandidates = fallback.map((r, i) => ({ chunk_id: r.chunk_id, rank: i }));
@@ -210,7 +212,7 @@ export async function recall(
     mode,
     targetCandidates,
     items: allocated,
-    next: "Host: rerank descriptors for current goal; read every plausibly needed ref. Recall again with narrower cues after branch, contradiction, failed assumption, or missing context.",
+    next: "Read every plausible ref. Recall again mid-task on branch/error/missing context.",
     attribution: {
       lexCapped: lexRows.length,
       vecCapped: vecRows.length,

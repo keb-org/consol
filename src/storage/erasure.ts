@@ -408,7 +408,7 @@ export async function derivativeMutations(
 }
 
 export async function forgetPlan(vault: string, agentRoot: string, target: string) {
-  if (!target?.trim()) throw new Error("empty target — category: type error (forget target must be a non-empty docId or search string). Fix: pass a non-empty target string identifying the memory to forget");
+  if (!target?.trim()) throw new Error("empty target — category: type error. Fix: pass non-empty target");
   const candidates: string[] = [];
   const dirs = ["memories", "cases", "experiences", "skills", "core"];
   for (const d of dirs) {
@@ -437,12 +437,12 @@ export async function forgetPlan(vault: string, agentRoot: string, target: strin
 
 export async function forgetConfirm(vault: string, agentRoot: string, agent: string, target: string, confirmation: string, db?: Database) {
   const planPath = path.join(agentRoot, "jobs", `forget-${confirmation}.json`);
-  if (!existsSync(planPath)) throw new Error("unknown confirmation token — category: stale or type error (no forget plan file for this confirmation; token may be typo, expired, or from different agent). Fix: run forget without confirmation first to get a fresh token, then confirm with the same target string");
+  if (!existsSync(planPath)) throw new Error("unknown confirmation token — category: stale. Fix: call forget without confirmation first");
   const plan = JSON.parse(await readFile(planPath, "utf8")) as Partial<ForgetPlan> & { target?: string };
   const targetMatchesPlan = plan.targetHash
     ? plan.targetHash === hashContent(target)
     : plan.target === target;
-  if (!targetMatchesPlan) throw new Error("target mismatch — category: type error (confirmation token was issued for a different target string). Fix: call forgetConfirm with the exact same target you used in forgetPlan; do not change target between plan and confirm");
+  if (!targetMatchesPlan) throw new Error("target mismatch — category: type error. Fix: call forgetConfirm with exact target from forgetPlan");
   const candidates = Array.isArray(plan.candidates) ? plan.candidates : [];
   const aRootReal = path.resolve(agentRoot);
   const allowedDirs = new Set(["memories", "cases", "experiences", "skills", "core"]);

@@ -77,28 +77,28 @@ function validateAccessField(
   canonicalTokens: Set<string>,
 ): string[] | undefined {
   if (values === undefined) return undefined;
-  if (!Array.isArray(values)) throw new Error(`${field} must be string[] — category: type error (expected array of strings for access.${field}). Fix: pass string[] or omit the field`);
+  if (!Array.isArray(values)) throw new Error(`${field} must be string[] — category: type error. Fix: pass string[] or omit`);
   const normalized: string[] = [];
   const seen = new Set<string>();
   for (const raw of values) {
-    if (typeof raw !== "string") throw new Error(`${field} entries must be strings — category: type error (every access.${field} entry must be a string). Fix: coerce or drop non-string entries`);
+    if (typeof raw !== "string") throw new Error(`${field} entries must be strings — category: type error. Fix: pass strings only`);
     const value = normalizeAccessItem(raw);
     if (!value) continue;
-    if (Buffer.byteLength(value, "utf8") > ACCESS_MAX_ITEM_BYTES) throw new Error(`${field} entry exceeds ${ACCESS_MAX_ITEM_BYTES} bytes — category: out-of-bounds. Fix: shorten this ${field} entry to <= ${ACCESS_MAX_ITEM_BYTES} UTF-8 bytes (trim aliases/entities/facets/likelyQueries)`);
-    if (/[\r\n\x00-\x1F\x7F]/.test(value)) throw new Error(`${field} entry contains control characters — category: type error (control/line-break characters not allowed). Fix: remove \\r, \\n, or ASCII controls from this ${field} entry`);
-    if (/\[\[|\]\]/.test(value)) throw new Error(`${field} entry contains wiki-link syntax — category: type error ([[ ] ] is reserved for canonical evidence). Fix: remove [[wiki-link]] brackets from access intent; use plain phrases`);
+    if (Buffer.byteLength(value, "utf8") > ACCESS_MAX_ITEM_BYTES) throw new Error(`${field} entry exceeds ${ACCESS_MAX_ITEM_BYTES} bytes — category: out-of-bounds. Fix: shorten entry to <= ${ACCESS_MAX_ITEM_BYTES} bytes`);
+    if (/[\r\n\x00-\x1F\x7F]/.test(value)) throw new Error(`${field} contains control characters — category: type error. Fix: remove newlines and control characters`);
+    if (/\[\[|\]\]/.test(value)) throw new Error(`${field} contains wiki-link syntax — category: type error. Fix: remove [[ ]] brackets`);
     const key = value.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    if (field === "facets" && isGenericSingleTokenFacet(value)) throw new Error(`generic facet rejected: ${value} — category: type error (single-token generic hubs like system/project/memory/task become retrieval hubs). Fix: use a more specific multi-token or narrow facet, or drop this generic facet`);
+    if (field === "facets" && isGenericSingleTokenFacet(value)) throw new Error(`generic facet rejected: ${value} — category: type error. Fix: use specific multi-token facet or drop`);
     for (const token of extractStructuredTokens(value)) {
       const supported = canonicalTokens.has(token) || [...canonicalTokens].some((ct) => ct.includes(token) || token.includes(ct));
-      if (!supported) throw new Error(`${field} entry introduces unsupported structured value: ${token} — category: type error (access may only route to facts already in statement/scope/refs, not invent new IDs/dates/versions). Fix: ensure '${token}' appears verbatim or as substring in the canonical statement/scope/refs, or remove it from access.${field}`);
+      if (!supported) throw new Error(`${field} introduces unsupported structured value: ${token} — category: type error. Fix: ensure '${token}' exists in statement/scope/refs`);
     }
     normalized.push(value);
   }
   const limit = ACCESS_LIMITS[field as keyof typeof ACCESS_LIMITS];
-  if (normalized.length > limit) throw new Error(`${field} exceeds limit ${limit} — category: out-of-bounds (bounded routing metadata). Fix: keep at most ${limit} entries in access.${field}; drop lowest-value aliases/entities/facets/queries`);
+  if (normalized.length > limit) throw new Error(`${field} exceeds limit ${limit} — category: out-of-bounds. Fix: keep at most ${limit} entries`);
   return normalized.length ? normalized : undefined;
 }
 
@@ -109,7 +109,7 @@ export function normalizeAccessIntent(
   refs?: string[],
 ): AccessIntent | undefined {
   if (!access) return undefined;
-  if (typeof access !== "object" || Array.isArray(access)) throw new Error("access must be an object — category: type error (expected {aliases?:string[], entities?:string[], facets?:string[], likelyQueries?:string[]} object). Fix: pass an object or omit access entirely; do not pass a string/array/null");
+  if (typeof access !== "object" || Array.isArray(access)) throw new Error("access must be object — category: type error. Fix: pass object or omit");
   const canonicalTokens = canonicalTokenSet(statement, scope, refs);
   const out: AccessIntent = {};
   const aliases = validateAccessField("aliases", (access as Record<string, unknown>).aliases as string[] | undefined, canonicalTokens);
@@ -122,7 +122,7 @@ export function normalizeAccessIntent(
   if (likelyQueries) out.likelyQueries = likelyQueries;
   if (!out.aliases && !out.entities && !out.facets && !out.likelyQueries) return undefined;
   const encoded = encodeAccessValue(out);
-  if (Buffer.byteLength(encoded, "utf8") > ACCESS_MAX_ENCODED_BYTES) throw new Error(`access payload exceeds ${ACCESS_MAX_ENCODED_BYTES} bytes — category: out-of-bounds (encoded access_v1 frontmatter too large). Fix: shorten aliases/entities/facets/likelyQueries entries or reduce count until encoded size <= ${ACCESS_MAX_ENCODED_BYTES}`);
+  if (Buffer.byteLength(encoded, "utf8") > ACCESS_MAX_ENCODED_BYTES) throw new Error(`access payload exceeds ${ACCESS_MAX_ENCODED_BYTES} bytes — category: out-of-bounds. Fix: reduce access entries`);
   return out;
 }
 
@@ -149,11 +149,11 @@ async function findDuplicate(agentRoot: string, statement: string) {
 }
 
 export async function remember(vault: string, agentRoot: string, agent: string, input: RememberInput, db?: Database) {
-  if (!input.statement?.trim()) throw new Error("empty statement — category: type error (statement is required and must be non-empty). Fix: provide a 1–2000 char factual statement; do not call remember with empty or whitespace-only text");
+  if (!input.statement?.trim()) throw new Error("empty statement — category: type error. Fix: provide non-empty statement");
   const refs = [...new Set((input.refs ?? []).map((ref) => ref.trim()).filter(Boolean))];
   const access = normalizeAccessIntent(input.access, input.statement, input.scope, refs);
-  if (containsSecret({ statement: input.statement, scope: input.scope, refs, access })) throw new Error("secret rejected: input contains a credential/API key/secret pattern — category: unauthorized (secret must not be persisted). Fix: redact the secret from statement/scope/refs/access and retry; use a placeholder like [REDACTED]");
-  if (refs.some((ref) => ref.length > 500 || /[\r\n\[\]]/.test(ref))) throw new Error("invalid ref — category: type error (each ref must be <=500 chars and must not contain \\r, \\n, [ or ]). Fix: pass short provenance strings without line breaks or bracket syntax; trim refs before calling remember");
+  if (containsSecret({ statement: input.statement, scope: input.scope, refs, access })) throw new Error("secret rejected: input contains credential/API key — category: unauthorized. Fix: redact secret");
+  if (refs.some((ref) => ref.length > 500 || /[\r\n\[\]]/.test(ref))) throw new Error("invalid ref — category: type error. Fix: pass short ref without line breaks or brackets");
   const dedup = await findDuplicate(agentRoot, input.statement);
   if (dedup) return { id: dedup, dedup: true };
   const id = stableId("mem-");
@@ -187,39 +187,39 @@ function stringField(data: Record<string, unknown>, key: string) {
 function stringRefs(value: unknown, key: string) {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.some((ref) => typeof ref !== "string" || !ref.trim())) {
-    throw new Error(`${key} must be string[] — category: type error (expected array of non-empty strings). Fix: pass ${key} as string[] with non-empty entries or omit it`);
+    throw new Error(`${key} must be string[] — category: type error. Fix: pass string[] with non-empty entries`);
   }
   return [...new Set(value.map((ref) => ref.trim()))];
 }
 
 function validateCaseData(data: Record<string, unknown>) {
-  if (!stringField(data, "rootSource")) throw new Error("case rootSource required — category: type error (record kind=case requires data.rootSource non-empty string). Fix: include data.rootSource describing the root source/origin");
-  if (!stringField(data, "task")) throw new Error("case task required — category: type error (case requires data.task). Fix: include data.task string");
-  if (!stringField(data, "environment")) throw new Error("case environment required — category: type error (case requires data.environment). Fix: include data.environment string");
-  if (!stringField(data, "action")) throw new Error("case action required — category: type error (case requires data.action). Fix: include data.action string");
-  if (!stringField(data, "observableOutcome")) throw new Error("case observableOutcome required — category: type error (case requires data.observableOutcome). Fix: include data.observableOutcome describing what was observed");
-  if (!stringField(data, "evaluator")) throw new Error("case evaluator required — category: type error (case requires data.evaluator). Fix: include data.evaluator");
+  if (!stringField(data, "rootSource")) throw new Error("case rootSource required — category: type error. Fix: include data.rootSource");
+  if (!stringField(data, "task")) throw new Error("case task required — category: type error. Fix: include data.task");
+  if (!stringField(data, "environment")) throw new Error("case environment required — category: type error. Fix: include data.environment");
+  if (!stringField(data, "action")) throw new Error("case action required — category: type error. Fix: include data.action");
+  if (!stringField(data, "observableOutcome")) throw new Error("case observableOutcome required — category: type error. Fix: include data.observableOutcome");
+  if (!stringField(data, "evaluator")) throw new Error("case evaluator required — category: type error. Fix: include data.evaluator");
   const outcome = stringField(data, "outcome");
-  if (!outcome || !OUTCOME_VALUES.has(outcome)) throw new Error("case outcome must be success, failure, partial, or unknown — category: type error. Fix: set data.outcome to one of success|failure|partial|unknown");
+  if (!outcome || !OUTCOME_VALUES.has(outcome)) throw new Error("case outcome must be success|failure|partial|unknown — category: type error. Fix: set data.outcome");
   return stringRefs(data.appliedRefs, "appliedRefs");
 }
 
 function validateOutcomeData(data: Record<string, unknown>, refs: string[]) {
   const outcome = stringField(data, "outcome");
-  if (!outcome || !OUTCOME_VALUES.has(outcome)) throw new Error("outcome must be success, failure, partial, or unknown — category: type error. Fix: set data.outcome to one of success|failure|partial|unknown");
+  if (!outcome || !OUTCOME_VALUES.has(outcome)) throw new Error("outcome must be success|failure|partial|unknown — category: type error. Fix: set data.outcome");
   const evaluator = stringField(data, "evaluator");
-  if (!evaluator || !EVALUATOR_VALUES.has(evaluator)) throw new Error("evaluator must be pass, fail, mixed, or unknown — category: type error. Fix: set data.evaluator to one of pass|fail|mixed|unknown");
+  if (!evaluator || !EVALUATOR_VALUES.has(evaluator)) throw new Error("evaluator must be pass|fail|mixed|unknown — category: type error. Fix: set data.evaluator");
   const appliedRefs = stringRefs(data.appliedRefs, "appliedRefs");
-  if (appliedRefs.some((ref) => !refs.includes(ref))) throw new Error("appliedRefs must also appear in refs — category: type error (every appliedRef must be listed in top-level refs for traceability). Fix: include each data.appliedRefs entry in the top-level refs array too");
+  if (appliedRefs.some((ref) => !refs.includes(ref))) throw new Error("appliedRefs must also appear in refs — category: type error. Fix: include each appliedRef in refs array");
   return appliedRefs;
 }
 
 export async function record(vault: string, agentRoot: string, agent: string, input: RecordInput) {
-  if (!RECORD_KINDS.has(input.kind)) throw new Error(`unsupported record kind: ${input.kind} — category: type error (expected one of ${[...RECORD_KINDS].join("|")}). Fix: use a valid kind string`);
-  if (!input.data || typeof input.data !== "object" || Array.isArray(input.data)) throw new Error("data object required — category: type error (record data must be a non-array object). Fix: pass data as {key: value} object, not string/array/null");
+  if (!RECORD_KINDS.has(input.kind)) throw new Error(`unsupported record kind: ${input.kind} — category: type error. Fix: use valid kind`);
+  if (!input.data || typeof input.data !== "object" || Array.isArray(input.data)) throw new Error("data object required — category: type error. Fix: pass data as {key: value} object");
   const refs = [...new Set((input.refs ?? []).map((ref) => ref.trim()).filter(Boolean))];
-  if (containsSecret({ data: input.data, refs })) throw new Error("secret rejected: input contains a credential/API key/secret pattern — category: unauthorized. Fix: redact secrets from data/refs and retry");
-  if (refs.some((ref) => ref.length > 500 || /[\r\n]/.test(ref))) throw new Error("invalid ref — category: type error (each ref must be <=500 chars and must not contain \\r/\\n). Fix: shorten refs and remove line breaks");
+  if (containsSecret({ data: input.data, refs })) throw new Error("secret rejected: input contains credential/secret — category: unauthorized. Fix: redact secrets");
+  if (refs.some((ref) => ref.length > 500 || /[\r\n]/.test(ref))) throw new Error("invalid ref — category: type error. Fix: shorten refs and remove newlines");
   const appliedRefs = input.kind === "case"
     ? validateCaseData(input.data)
     : input.kind === "outcome"

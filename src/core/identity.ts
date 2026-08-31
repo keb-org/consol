@@ -20,7 +20,7 @@ export type TeamMeta = {
 // SSOT: Canonical identifier validation for agents, teams, and bank roots
 export function sanitizeId(id: string, label = "identifier"): string {
   if (!id || typeof id !== "string" || id.includes("..") || id.includes("/") || id.includes("\\")) {
-    throw new Error(`invalid ${label}: ${id} — category: type error (${label} must be a non-empty simple name without "..", "/", "\\"). Fix: pass a plain name like "linus" matching /^[A-Za-z0-9._-]+$/`);
+    throw new Error(`invalid ${label}: ${id} — category: type error (${label} must match /^[A-Za-z0-9._-]+$/ without '..', '/', '\\'). Fix: pass plain name like 'linus'`);
   }
   return id.trim();
 }

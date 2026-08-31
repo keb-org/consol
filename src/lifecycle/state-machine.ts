@@ -82,20 +82,20 @@ export async function transitionCandidate(
   const fromStatus = meta.status ?? "candidate";
   const transition = `${fromStatus}:${toStatus}`;
   if (!ACTIVE_TRANSITIONS.has(transition) && !INACTIVE_TRANSITIONS.has(transition)) {
-    throw new Error(`invalid lifecycle transition: ${transition} — category: type error (transition not allowed). Fix: use one of candidate:staging, staging:active, candidate:disputed, candidate:retired, staging:disputed, staging:retired, active:disputed, active:retired, active:superseded, disputed:staging, disputed:retired`);
+    throw new Error(`invalid transition: ${transition} — category: type error. Fix: check status state machine`);
   }
   const canonical = await evidenceRecords(agentRoot);
   const canonicalIds = new Set(canonical.filter((record) => record.agent === agent).map((record) => record.id));
-  if (sourceRefs.some((ref) => !canonicalIds.has(ref))) throw new Error("source evidence not found or owned by another agent — category: stale or unauthorized (sourceRefs must point to evidence owned by this agent). Fix: re-run recall/record so the evidence exists under this agent; check agent: prefix and team attachment");
+  if (sourceRefs.some((ref) => !canonicalIds.has(ref))) throw new Error("source evidence not found — category: stale. Fix: ensure evidence owned by this agent");
   if (toStatus === "active") {
     const roots = independentSuccessRoots(canonical, targetId);
-    if (roots.size < 2) throw new Error("activation requires two independent successful application roots — category: out-of-bounds (need >=2 distinct rootSource values from success/pass evidence where appliedRefs includes targetId). Fix: record at least two separate successful applications with different rootSource before activating");
+    if (roots.size < 2) throw new Error("activation requires two independent successful application roots — category: out-of-bounds. Fix: record 2+ distinct rootSource successes");
     const appliedEvidence = canonical.filter((record) => {
       const applied = Array.isArray(record.data.appliedRefs) ? record.data.appliedRefs : [];
       return applied.includes(targetId) && record.data.outcome === "success" && record.data.evaluator === "pass";
     });
     if (sourceRefs.some((ref) => !appliedEvidence.some((record) => record.id === ref))) {
-      throw new Error("activation sources must be successful application outcomes — category: type error (every sourceRef for activation must be a success/pass evidence that applied this targetId). Fix: use only evidence where outcome=success, evaluator=pass, and appliedRefs includes targetId");
+      throw new Error("activation sources must be successful outcomes — category: type error. Fix: use success/pass evidence");
     }
   }
   const nextMeta = {
@@ -132,7 +132,7 @@ export async function transitionCandidate(
   };
   await withVaultLock(vault, async () => {
     const current = await readFile(file, "utf8");
-    if (hashContent(current) !== beforeHash) throw new Error("target changed during transition — category: stale (file was edited after transitionCandidate read it). Fix: re-read the note to get current hash/status and retry the transition");
+    if (hashContent(current) !== beforeHash) throw new Error("target changed during transition — category: stale. Fix: re-read note and retry");
     const snapshotExisted = existsSync(snapshot);
     const nextSnapshotExisted = existsSync(nextSnapshot);
     try {
@@ -164,9 +164,9 @@ export async function rollbackRevision(
 ) {
   const revisions = await auditRevisions(agentRoot);
   const revision = revisions.find((entry) => entry.id === revisionId);
-  if (!revision || revision.agent !== agent) throw new Error("revision not found — category: stale or type error (no audit entry matches this revisionId for this agent). Fix: list audit revisions and use a valid revisionId owned by this agent");
+  if (!revision || revision.agent !== agent) throw new Error("revision not found — category: stale. Fix: use valid revisionId for agent");
   if (revisions.some((entry) => entry.actor === "rollback" && entry.sourceRefs.includes(revisionId))) {
-    throw new Error("revision already rolled back — category: stale (this revision was already the target of a rollback). Fix: pick a different revisionId; check audit for prior rollback entries over this revision");
+    throw new Error("revision already rolled back — category: stale. Fix: pick different revisionId");
   }
   const directories = [...Object.values(TARGET_DIRS), "core"];
   const matches = directories

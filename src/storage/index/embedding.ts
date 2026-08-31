@@ -58,7 +58,7 @@ export async function getEmbedder(vault: string) {
     } catch (error) {
       embedderLoading = null;
       embedderError = error instanceof Error ? error.message : String(error);
-      throw new Error(`embed unavailable: ${embedderError} — category: out-of-bounds (model load failed: network/cache/timeout or incompatible env). Fix: check network/cache at ${cache}, retry; vector search will degrade gracefully while model is unavailable`);
+      throw new Error(`embed unavailable: ${embedderError} — category: out-of-bounds. Fix: check model cache at ${cache}`);
     }
   })();
   return embedderLoading;
@@ -83,14 +83,14 @@ export async function embedTexts(vault: string, texts: string[]): Promise<number
     const out: any = await invokeEmbedder(pipe, texts);
     const vectors = out.tolist() as number[][];
     if (vectors.length !== texts.length || vectors.some((v) => v.length !== EMBED_DIMS || v.some((n) => !Number.isFinite(n)))) {
-      throw new Error("invalid embedding shape or values — category: type error (embedder returned wrong count/dims or non-finite values; expected 384-d finite vectors). Fix: retry embedding; if persistent, re-download model cache or check transformer version");
+      throw new Error("invalid embedding shape/values — category: type error. Fix: check model cache and retry");
     }
     return vectors;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     embedderError = message;
     const wrapped = message.startsWith("embed unavailable") ? message : `embed unavailable: ${message}`;
-    throw new Error(wrapped.includes("category:") ? wrapped : `${wrapped} — category: out-of-bounds (embedding failed: network/cache/timeout or incompatible env). Fix: check network/cache, retry; vector search degrades gracefully while model is unavailable`);
+    throw new Error(wrapped.includes("category:") ? wrapped : `${wrapped} — category: out-of-bounds. Fix: check model cache and retry`);
   }
 }
 

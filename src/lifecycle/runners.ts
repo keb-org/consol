@@ -12,12 +12,12 @@ export type ReflectionRunResult = {
   diagnostics: string[];
 };
 
-const SYSTEM = `You are a memory reflection assistant following strict Caveman compression rules:
-1. Distill unreviewed evidence and related memory into precise, compressed candidate patches.
-2. Cut filler, pleasantries, articles (a, an, the), and conversational fluff. Use short synonyms and terse imperative sentences.
-3. Preserve verbatim: code blocks, inline code, IDs, numbers, file paths, and URLs.
-4. Return JSON: {"proposals":[{"id":"...","action":"create|update|skip","targetKind":"memory|case|experience|skill","targetId":"...","before":"...","after":"...","baseHash":"...","sourceRefs":["..."],"scope":"...","expectedEffect":"...","disconfirming":"...","alternatives":"...","rationale":"..."}]}
-5. Address every evidence record, cite exact evidence ID, cite only refs present in packet, no secrets, no erasure, no direct core edits or promotion, self-citation invalid, confidence is not truth. Use skip with evidence refs and rationale when no durable patch is warranted.`;
+const SYSTEM = `Distill unreviewed evidence into candidate patches.
+Rules:
+• Drop articles, pronouns, filler, fluff. Ultra-concise fragments.
+• No meta-discourse. Preserve exact code, IDs, paths, values.
+• Return JSON: {"proposals":[{"id":"...","action":"create|update|skip","targetKind":"memory|case|experience|skill","targetId":"...","before":"...","after":"...","baseHash":"...","sourceRefs":["..."],"scope":"...","expectedEffect":"...","disconfirming":"...","alternatives":"...","rationale":"..."}]}
+• Address every evidence record. Cite exact evidence ID. Cite only refs in packet. No secrets, no erasure, no direct core edits. Use skip with sourceRefs and rationale when no durable patch warranted.`;
 
 function jobPrompt(job: Job) {
   return JSON.stringify({ packet: job.packet, instructions: SYSTEM }, null, 2);
@@ -40,12 +40,12 @@ async function runCli(command: string[], timeoutMs = 120_000) {
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           proc.kill();
-          reject(new Error(`${command[0]} timed out after ${timeoutMs}ms — category: out-of-bounds (runner hung or prompt too large). Fix: shorten job prompt, raise timeoutMs, or check that ${command[0]} is installed and responsive`));
+          reject(new Error(`${command[0]} timed out after ${timeoutMs}ms — category: out-of-bounds. Fix: shorten prompt or raise timeout`));
         }, timeoutMs);
       }),
     ]);
     if (exitCode !== 0) {
-      throw new Error(`${command[0]} exited ${exitCode}${stderr.trim() ? ` — stderr: ${stderr.trim().slice(0, 600)}` : ""} — category: out-of-bounds or type error (runner CLI failed). Fix: ensure ${command[0]} is installed and the job prompt is valid JSON; check stderr above for cause`);
+      throw new Error(`${command[0]} exited ${exitCode}${stderr.trim() ? ` — stderr: ${stderr.trim().slice(0, 600)}` : ""} — category: out-of-bounds. Fix: check CLI installation and arguments`);
     }
     return stdout;
   } finally {
@@ -62,7 +62,7 @@ function extractJson(text: string) {
 function proposalEnvelope(value: unknown) {
   const parsed = typeof value === "string" ? JSON.parse(extractJson(value)) : value;
   if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as any).proposals)) {
-    throw new Error("runner output missing proposals — category: type error (expected JSON with {proposals: Proposal[]}). Fix: ensure runner returns valid JSON envelope {\"proposals\":[...]} matching the proposal schema; check runner stdout for malformed output");
+    throw new Error("runner output missing proposals — category: type error. Fix: ensure JSON envelope has {proposals: [...]}");
   }
   return (parsed as { proposals: Proposal[] }).proposals;
 }

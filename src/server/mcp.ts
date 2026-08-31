@@ -18,6 +18,25 @@ export type UsageHooks = {
   read?: (ctx: AgentCtx, input: { ref: string; docId: string; owner: string; offset: number; packetId?: string }) => Promise<void>;
 };
 
+const PROTOCOL_INSTRUCTIONS = `MANDATORY MEMORY PROTOCOL — Continuous injection mandatory. Single-recall-then-never violates protocol.
+
+LOOP:
+1. BEFORE: recall(query, agent). Read every plausible ref.
+2. MID: recall again on branch, error, assumption fail, missing context.
+3. AFTER: record outcome='success'|'failure'|'partial', evaluator='pass'|'fail'|'mixed', appliedRefs=[...].
+4. Subagents MUST inherit protocol.
+
+WRITE (remember/record):
+• Time: prefix '[Date: YYYY-MM-DD]'.
+• Values: verbatim numbers, currencies ($100, 1.5M₫, €50), versions (v1.2.3).
+• Cross-lingual: fill access.aliases/entities/facets/likelyQueries in target languages.
+• Dedup: exact assertions auto-deduplicate.
+
+QUERY (recall):
+• Anchors: quote exact names, IDs, versions ('"Sprint 1" deadline', '"v2.4.0"').
+• Terms: 2–6 dense content words. No conversational fluff.
+• Modes: auto (fusion), facts (notes), guidance (skills), history (audit/superseded).`;
+
 export async function createServer(
   argv: Record<string, string | boolean | undefined>,
   usageHooks: UsageHooks = {},
@@ -53,17 +72,15 @@ export async function createServer(
 
   const server = new McpServer(
     { name: "consol", version: pkg.version },
-    {
-      instructions: "MANDATORY MEMORY PROTOCOL — Every agent and every spawned subagent MUST use Consol as human-like, continuously-injected memory. One recall at the start is NOT enough — memory must be injected throughout reasoning. Single-recall-then-never-again violates protocol.\n\nHuman loop (repeat until task done):\n1. BEFORE work: call recall on the matched agent bank and rerank descriptors for the current goal.\n2. Strong match → read every plausible ref and apply it.\n3. No/weak/uncertain match → search online/docs (web search, Context7 for library docs, codebase search), then proceed. Do not hallucinate when Consol has no answer.\n4. MID-REASONING — after every tool result, before every edit/decision/subagent spawn, ask 'do I need memory for this next step?' If yes, recall again with a narrower query derived from new context. Mandatory triggers: task branches, new error/observation, assumption failed, evidence conflicts, context missing, or before any high-impact code change/decision. Recall is bounded and cheap (<1k tokens) — no token-saving excuse.\n5. AFTER work: MUST call record with observable outcome, evaluator, and appliedRefs (repeat those refs in top-level refs). Retrieval/read alone never means application or success.\n6. Parent agents MUST propagate this protocol to every subagent they spawn.",
-    },
+    { instructions: PROTOCOL_INSTRUCTIONS },
   );
 
-  const agentParam = z.string().min(1).optional().describe("Agent/bank id (e.g. linus, ilya). Defaults to server AGENT.");
+  const agentParam = z.string().min(1).optional().describe("Agent/bank ID (e.g. linus, ilya). Defaults to server AGENT.");
 
   server.registerTool(
     "recall",
     {
-      description: "MANDATORY — call repeatedly, not just once. Retrieve bounded compact candidates (<1k tokens). Use 2–6 content terms, quote exact names/IDs/versions/phrases, keep temporal modifiers like current/previous/adjusted/between — e.g. '\"Sprint 1\" deadline adjusted' not 'What is the Sprint 1 deadline?'. Protocol: (a) call before ANY substantive work, (b) call AGAIN mid-reasoning after every tool result / before every edit/decision/subagent spawn when the next step could benefit from memory — mandatory triggers: task branches, new error/observation, assumption failed, evidence conflicts, context missing, before high-impact change. Then rerank descriptors; if no strong match or low confidence, search online/docs (web search, Context7, codebase search) instead of hallucinating. One recall at start then never again violates protocol.",
+      description: "MANDATORY — Retrieve candidates (<1k tokens). Query: 2-6 words, quote exact anchors ('\"v1.2\" port'). Modes: auto, facts, guidance, history. Repeat mid-task when context branches.",
       inputSchema: { query: z.string().min(1), mode: z.enum(["auto", "facts", "guidance", "history"]).optional(), agent: agentParam },
       annotations: { readOnlyHint: true, idempotentHint: true },
     },
@@ -85,7 +102,7 @@ export async function createServer(
       const response = JSON.stringify({ ...packet, agent: ctx.agent, syncWarning: ctx.syncWarning });
       const ceiling = Math.min(config.budgets.packetTokens, config.budgets.packetCeiling) * 4;
       if (Buffer.byteLength(response, "utf8") > ceiling) {
-        throw new Error(`MCP recall response exceeds ${ceiling}-byte ceiling — category: out-of-bounds (serialized packet JSON larger than packetCeiling*4). Fix: lower budgets.perArmCap/targetCandidates or shorten stored summaries so fewer/smaller items are packed; retry recall`);
+        throw new Error(`MCP recall response exceeds ${ceiling}-byte ceiling — category: out-of-bounds. Fix: lower perArmCap/targetCandidates or shorten summaries`);
       }
       return { content: [{ type: "text" as const, text: response }] };
     },
@@ -94,7 +111,7 @@ export async function createServer(
   server.registerTool(
     "read",
     {
-      description: "MANDATORY after each recall that returns candidates — including mid-reasoning recalls. Read one UTF-8 byte-bounded page from a recall ref; pass cursor for next page. Pass agent when reading team-owned refs. Every plausible candidate MUST be read before the next decision. If recall returned nothing useful, search online/docs instead — do not skip.",
+      description: "MANDATORY after recall. Read byte-bounded chunk from ref; pass cursor for next page. Read all plausible refs before decisions.",
       inputSchema: { ref: z.string().min(1), cursor: z.string().optional(), agent: agentParam },
       annotations: { readOnlyHint: true, idempotentHint: true },
     },
@@ -103,7 +120,7 @@ export async function createServer(
       const ownerAgent = decoded.o.startsWith("agent:") ? decoded.o.slice("agent:".length) : undefined;
       const ctx = await resolveCtx(agent ?? ownerAgent);
       const allowedOwners = new Set([`agent:${ctx.agent}`, ...ctx.teamOwners]);
-      if (!allowedOwners.has(decoded.o)) throw new Error(`ref owner not attached to agent: ref owner ${decoded.o} not in {agent:${ctx.agent}, ${[...ctx.teamOwners].join(", ")}} — category: unauthorized (agent not attached to owning team). Fix: attach the team via attachTeam, or call read with agent=<ownerAgent> (e.g. agent="${decoded.o.startsWith("team:") ? decoded.o.slice(5) : decoded.o.slice(6)}")`);
+      if (!allowedOwners.has(decoded.o)) throw new Error(`unauthorized ref owner: ${decoded.o} not in {agent:${ctx.agent}, ${[...ctx.teamOwners].join(", ")}} — category: unauthorized. Fix: call read with agent="${decoded.o.replace(/^(agent|team):/, "")}" or attach team`);
       const chunk = readChunk(ctx.db, ref, config.budgets, cursor);
       const usage = {
         ref,
@@ -120,16 +137,16 @@ export async function createServer(
   );
 
   const accessIntentSchema = z.object({
-    aliases: z.array(z.string()).max(8).optional(),
-    entities: z.array(z.string()).max(8).optional(),
-    facets: z.array(z.string()).max(8).optional(),
-    likelyQueries: z.array(z.string()).max(6).optional(),
-  }).optional().describe("Optional future-access intent — alternate names, canonical entities, narrow facets, likely searches. Must only route to facts already supported by statement/scope/refs; bounded and validated.");
+    aliases: z.array(z.string()).max(8).optional().describe("Alternate names/translations (<=8 entries, <=120 bytes)."),
+    entities: z.array(z.string()).max(8).optional().describe("Entities/proper nouns (<=8 entries)."),
+    facets: z.array(z.string()).max(8).optional().describe("Semantic categories (<=8 entries, no generic single words)."),
+    likelyQueries: z.array(z.string()).max(6).optional().describe("Predicted search queries/questions (<=6 entries)."),
+  }).optional().describe("Future-access routing metadata for hidden search surfaces.");
 
   server.registerTool(
     "remember",
     {
-      description: "Persist explicit durable assertion with provenance. Exact assertions deduplicate; inferred experience cannot become active through this tool. Optional access intent captures future lookup language (aliases/entities/facets/likelyQueries) while facts are fresh — routing metadata only, never evidence.",
+      description: "Persist durable assertion. Prefix temporal with '[Date: YYYY-MM-DD]'. Use access for cross-lingual lookup.",
       inputSchema: { statement: z.string().min(1), scope: z.string().optional(), refs: z.array(z.string()).optional(), access: accessIntentSchema, agent: agentParam },
       annotations: { idempotentHint: true },
     },
@@ -143,7 +160,7 @@ export async function createServer(
   server.registerTool(
     "record",
     {
-      description: "MANDATORY — call after every substantive step AND at task end (not just at end). Append evidence for later reflection. For outcome, pass outcome=success|failure|partial|unknown, evaluator=pass|fail|mixed|unknown, and optional appliedRefs also listed in refs. Retrieval/read/recall alone never means application or success. Mid-reasoning record keeps the vault current for the next recall.",
+      description: "MANDATORY — Append evidence for skill distillation. Post-task outcome: outcome='success'|'failure', evaluator='pass'|'fail', appliedRefs=[...].",
       inputSchema: { kind: z.enum(["observation", "action", "feedback", "result", "outcome", "case", "correction"]), data: z.record(z.unknown()), refs: z.array(z.string()).optional(), agent: agentParam },
     },
     async ({ kind, data, refs, agent }) => {
@@ -156,7 +173,7 @@ export async function createServer(
   server.registerTool(
     "forget",
     {
-      description: "Two-phase erasure. Omit confirmation to inspect plan and token; provide returned token only after user confirms same target.",
+      description: "Two-phase erasure. Omit confirmation to get plan/token; provide confirmation token to execute cascade scrub.",
       inputSchema: { target: z.string().min(1), confirmation: z.string().optional(), agent: agentParam },
       annotations: { destructiveHint: true, idempotentHint: false },
     },

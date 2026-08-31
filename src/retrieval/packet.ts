@@ -73,7 +73,7 @@ export function decodeRef(ref: string) {
   try {
     decoded = JSON.parse(Buffer.from(ref, "base64url").toString("utf8"));
   } catch {
-    throw new Error("invalid ref: not base64url JSON — category: type error (malformed/corrupted or truncated encoding; expected base64url of {c:number,d:string,h:string(8hex),o:string,p?:string}). Fix: obtain a fresh ref from a recent recall packet and pass it unchanged; do not hand-edit, truncate, or re-encode refs");
+    throw new Error("invalid ref: not base64url JSON — category: type error. Fix: pass unchanged ref from recall");
   }
   const r = decoded as Record<string, unknown>;
   if (
@@ -83,7 +83,7 @@ export function decodeRef(ref: string) {
     typeof r.o !== "string" ||
     (r.p !== undefined && typeof r.p !== "string")
   ) {
-    throw new Error("invalid ref: shape/type mismatch — category: type error (expected {c:safeInteger, d:string, h:string(8hex), o:string, p?:string}). Fix: use a ref exactly as returned by recall; do not construct or edit refs manually — re-run recall for a fresh ref if you built or truncated it");
+    throw new Error("invalid ref: shape mismatch — category: type error. Fix: use verbatim ref from recall");
   }
   return r as { c: number; d: string; h: string; o: string; p?: string };
 }
@@ -169,7 +169,7 @@ export function fitPacket(draft: PacketDraft, budgets: Budgets): Packet {
       items = items.slice(0, -1);
       continue;
     }
-    throw new Error(`packet metadata exceeds ${ceiling}-byte ceiling — category: out-of-bounds (even after trimming to 0 items the packet JSON exceeds packetCeiling). Fix: raise budgets.packetTokens/packetCeiling or lower perArmCap/targetCandidates so fewer items are packed; check for oversized summaries`);
+    throw new Error(`packet metadata exceeds ${ceiling}-byte ceiling — category: out-of-bounds. Fix: raise packetCeiling or lower perArmCap/targetCandidates`);
   }
 }
 
@@ -188,23 +188,23 @@ export function encodeCursor(ref: string, offset: number): string {
 export function decodeCursor(cursor: string, ref: string): number {
   try {
     const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
-    if (parsed.r !== ref || !Number.isSafeInteger(parsed.b) || parsed.b < 0) throw new Error("cursor validation failed — category: out-of-bounds or type error (cursor r must equal ref and b must be safe integer >=0; signal caught immediately and re-thrown as instructive invalid cursor below)");
+    if (parsed.r !== ref || !Number.isSafeInteger(parsed.b) || parsed.b < 0) throw new Error("cursor validation failed");
     return parsed.b as number;
   } catch {
-    throw new Error("invalid cursor: not base64url {r:ref,b:offset} bound to this ref or offset is negative/non-integer/type mismatch — category: out-of-bounds or type error (cursor must be exactly the cursor returned for this ref, offset within [0,totalBytes]). Fix: re-issue read without cursor to restart at offset 0, or verify cursor belongs to this same ref and offset <= totalBytes; obtain a fresh cursor from the previous read response");
+    throw new Error("invalid cursor — category: out-of-bounds. Fix: omit cursor or use valid cursor from prior read");
   }
 }
 
 export function readChunk(db: Database, ref: string, budgets: Budgets, cursor?: string) {
   const { c, d, h, o } = decodeRef(ref);
   const row = db.query("SELECT text, doc_id, section, hash, owner, status FROM chunks WHERE chunk_id=?").get(c) as any;
-  if (!row) throw new Error("unknown ref: no chunk with this chunk_id in index — category: stale or out-of-bounds (index was rebuilt, chunk deleted, or ref forged). Fix: re-run recall to obtain a current ref; do not reuse refs across rebuilds");
-  if (row.doc_id !== d) throw new Error("ref document mismatch: ref.docId does not match indexed chunk.doc_id — category: stale or unauthorized (ref is stale or forged). Fix: discard this ref and obtain a new one via recall; never hand-edit the docId inside the encoded ref");
-  if (row.owner !== o) throw new Error("ref owner mismatch: ref owner does not match chunk.owner — category: unauthorized (ref owned by different agent/team). Fix: attach the owning team or call read with agent=<ownerAgent>, or re-recall as the owning agent; check agent: vs team: prefix");
-  if (!row.hash.startsWith(h)) throw new Error("stale ref: content hash changed — category: stale (file was overwritten since recall; chunk text diverged). Fix: recall again for a fresh ref with the current hash");
+  if (!row) throw new Error("unknown ref: chunk not found — category: stale. Fix: recall again for fresh ref");
+  if (row.doc_id !== d) throw new Error("ref document mismatch — category: stale. Fix: recall again for fresh ref");
+  if (row.owner !== o) throw new Error("ref owner mismatch — category: unauthorized. Fix: attach team or set agent");
+  if (!row.hash.startsWith(h)) throw new Error("stale ref: content hash changed — category: stale. Fix: recall again for fresh ref");
   const offset = cursor ? decodeCursor(cursor, ref) : 0;
   const page = sliceUtf8(row.text, offset, budgets.l2Bytes);
-  if (offset > page.totalBytes) throw new Error(`cursor past end: offset ${offset} > totalBytes ${page.totalBytes} — category: out-of-bounds. Fix: use offset <= totalBytes or omit cursor to read from 0; check done=true means no next page`);
+  if (offset > page.totalBytes) throw new Error(`cursor past end: offset ${offset} > totalBytes ${page.totalBytes} — category: out-of-bounds. Fix: use offset <= totalBytes or omit cursor`);
   const done = page.nextOffset >= page.totalBytes;
   return {
     docId: row.doc_id,

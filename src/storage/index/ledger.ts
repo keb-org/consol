@@ -16,9 +16,15 @@ const MONTHS: Record<string, string> = {
 
 export function canonicalDate(value: string | undefined): string | null {
   if (!value) return null;
-  const iso = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:T.*)?$/);
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-  const named = value.trim().match(/^([A-Za-z]+)[ -](\d{1,2})(?:,|[ -])\s*(\d{4})$/);
+  const clean = value.trim();
+  // ISO: YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
+  const iso = clean.match(/^(\d{4})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])(?:T.*)?$/);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
+  // CJK: YYYY年MM月DD日
+  const cjk = clean.match(/^(\d{4})年\s*(0?[1-9]|1[0-2])月\s*(0?[1-9]|[12]\d|3[01])日?$/);
+  if (cjk) return `${cjk[1]}-${cjk[2].padStart(2, "0")}-${cjk[3].padStart(2, "0")}`;
+  // English Named: Month DD, YYYY
+  const named = clean.match(/^([A-Za-z]+)[ -](\d{1,2})(?:,|[ -])\s*(\d{4})$/);
   const month = named && MONTHS[named[1].toLowerCase()];
   return named && month ? `${named[3]}-${month}-${named[2].padStart(2, "0")}` : null;
 }
@@ -49,7 +55,7 @@ function versionContext(text: string, start: number): boolean {
   const before = text.slice(Math.max(0, start - 48), start);
   if (/[-_#]$/.test(before) || /\b(?:id|ticket|issue)\s*[-#:]?\s*$/i.test(before)) return false;
   if (/(?:\bversion\s*|\bv\s*)$/i.test(before)) return true;
-  return /\b(?:[A-Z][A-Za-z0-9+#_-]*|[A-Za-z][A-Za-z0-9_-]*\.[A-Za-z0-9._-]+)\s*$/.test(before);
+  return /\b(?:[\p{Lu}][\p{L}\p{N}+#_-]*|[\p{L}][\p{L}\p{N}_-]*\.[\p{L}\p{N}._-]+)\s*$/u.test(before);
 }
 
 function meaningfulPlainNumber(text: string, start: number, end: number, value: string): boolean {
@@ -80,13 +86,20 @@ function addNumericMatches(
 export function extractNumericEvidence(chunkText: string): NumericEvidence[] {
   const text = chunkText.replace(/^\s*\[Date:\s*[^\]]+\]\s*/i, "");
   const matches: NumericMatch[] = [];
+  // English Named Dates
   addNumericMatches(matches, text, /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)[ -]\d{1,2}(?:st|nd|rd|th)?(?:,|[ -])\s*\d{4}\b/gi, "date");
-  addNumericMatches(matches, text, /\b\d{4}-\d{2}-\d{2}\b/g, "date");
-  addNumericMatches(matches, text, /(?:[$€£¥]\s*\d[\d,]*(?:\.\d+)?|\b\d[\d,]*(?:\.\d+)?\s*(?:USD|EUR|GBP|JPY)\b)(?:\s*\/\s*[A-Za-z]+)?/gi, "money");
-  addNumericMatches(matches, text, /\b\d[\d,]*(?:\.\d+)?\s*%/g, "percentage");
+  // ISO / International Dates: YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD, YYYY年MM月DD日
+  addNumericMatches(matches, text, /\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\b|\b\d{4}年\d{1,2}月\d{1,2}日\b/gu, "date");
+  // Multi-currency symbols: $, €, £, ¥, ₫, ₩, ₽, ฿, ₪, ₴, ₦, ₵, BTC, ETH, USD, EUR, GBP, JPY, VND, CNY, KRW
+  addNumericMatches(matches, text, /(?:[$€£¥₫₩₽฿₪₴₦₵]\s*\d[\d,]*(?:\.\d+)?|\b\d[\d,]*(?:\.\d+)?\s*(?:USD|EUR|GBP|JPY|VND|CNY|KRW|AUD|CAD|CHF|BTC|ETH)\b)(?:\s*\/\s*[\p{L}]+)?/giu, "money");
+  // Percentage: 50%, 99.9 %
+  addNumericMatches(matches, text, /\b\d[\d,]*(?:\.\d+)?\s*%/gu, "percentage");
+  // Measurement units: ms, seconds, hours, qps, tps, mb, gb, etc.
   addNumericMatches(matches, text, /\b\d[\d,]*(?:\.\d+)?\s*[KMB]?(?:\s+|-)?(?:milliseconds?|msecs?|ms|seconds?|secs?|minutes?|mins?|hours?|hrs?|days?|weeks?|months?|years?|qps|rps|tps|req(?:uests?)?\/s|requests?\s+per\s+second|records?|documents?|instances?|tasks?|items?|users?|tokens?|bytes?|kb|mb|gb|tb|apis?|endpoints?)\b/gi, "measure");
+  // Versions: v1.2.3, version 2.0, 1.2.3 in version context
   addNumericMatches(matches, text, /\bv(?:ersion)?\s*\d+(?:\.\d+){0,3}\b/gi, "version");
   addNumericMatches(matches, text, /\b\d+(?:\.\d+){0,3}\b/g, "version", (match) => versionContext(text, match.index));
+  // Plain meaningful numbers
   addNumericMatches(matches, text, /\b\d[\d,]*(?:\.\d+)?\b/g, "number", (match) => meaningfulPlainNumber(text, match.index, match.index + match[0].length, match[0]));
   return matches
     .sort((a, b) => a.position - b.position || a.end - b.end)
