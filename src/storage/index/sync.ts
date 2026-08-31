@@ -107,7 +107,7 @@ export async function indexFile(db: Database, vault: string, full: string, rel: 
     const surfaces = buildSurfacesForChunk(chunk, accessDecoded, docId);
     await insertSurfaces(db, vault, chunkId, surfaces);
   }
-  const links = [...new Set(wikiLinks(body))];
+  const links = [...new Set(wikiLinks(body, meta))];
   db.query("DELETE FROM links WHERE src=?").run(docId);
   for (const dst of links) db.query("INSERT INTO links(src,dst) VALUES(?,?)").run(docId, dst);
 }

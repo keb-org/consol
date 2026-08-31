@@ -203,8 +203,8 @@ export async function recall(
   for (const r of fetchAuthorized(db, expanded.map((x) => x.chunk_id), mode, ownerFilter, teams)) chunkByDoc.set(r.doc_id, r as ChunkRow);
   const deduped = dedupByStatement(rawCandidates, chunkByDoc);
   const boosted = boostReusable(deduped, lexCollapsed.size, perArm);
-  const candidates = (lexCollapsed.size === 0 && boosted.length > 3)
-    ? [...boosted].sort((a, b) => (Number(isTransferable(b)) - Number(isTransferable(a))) || (b.rrf - a.rrf) || a.docId.localeCompare(b.docId))
+  const candidates = (boosted.length > 0)
+    ? [...boosted].sort((a, b) => (b.rrf - a.rrf) || (Number(isTransferable(b)) - Number(isTransferable(a))) || a.docId.localeCompare(b.docId))
     : boosted;
   const allocated = allocate(candidates, targetCandidates, budgets);
   const packet = fitPacket({

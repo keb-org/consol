@@ -148,12 +148,17 @@ export async function withVaultLock<T>(vault: string, fn: () => Promise<T>): Pro
   }
 }
 
-export function wikiLinks(text: string): string[] {
+export function wikiLinks(text: string, meta?: Record<string, string>): string[] {
   const out: string[] = [];
   const re = /\[\[([^\]|#]+)(?:#[^\]]*)?(?:\|[^\]]*)?\]\]/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) out.push(m[1].trim());
-  return out;
+  if (meta?.source_refs) {
+    for (const ref of meta.source_refs.split(/[;,]/).map((r) => r.trim().replace(/^\[\[|\]\]$/g, "")).filter(Boolean)) {
+      out.push(ref);
+    }
+  }
+  return [...new Set(out)];
 }
 
 // Sparse globally. Clustered locally. Local clusters interconnected globally.
